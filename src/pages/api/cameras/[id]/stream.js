@@ -28,9 +28,23 @@ export default function handler(req, res) {
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
             '-tune', 'zerolatency',
+            '-profile:v', 'baseline',
+            '-level', '3.0',
+            '-pix_fmt', 'yuv420p',
+            '-r', '15',              // 15 fps para mejor fluidez
+            '-s', '854x480',         // Resolución más baja
+            '-b:v', '500k',          // Bitrate más bajo
+            '-maxrate', '500k',
+            '-bufsize', '1000k',
+            '-g', '30',              // Keyframe cada 2 segundos
             '-c:a', 'aac',
+            '-ar', '22050',
+            '-ac', '2',
+            '-b:a', '64k',
             '-f', 'mp4',
-            '-movflags', 'frag_keyframe+empty_moov',
+            '-movflags', 'frag_keyframe+empty_moov+default_base_moof+frag_every_frame',
+            '-frag_duration', '500000',  // Fragmentos más pequeños
+            '-min_frag_duration', '500000',
             '-'
         ]);
 
