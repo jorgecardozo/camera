@@ -10,7 +10,7 @@ export default function CameraStream({ camera, onUpdate }) {
     // Generar URL del stream HTTP
     useEffect(() => {
         if (camera && camera.id) {
-            setStreamUrl(`/api/cameras/${camera.id}/stream`);
+            setStreamUrl(`/api/cameras/${camera.id}/mjpeg`);
         }
     }, [camera]);
 

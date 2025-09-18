@@ -35,6 +35,7 @@ export class CameraManager {
     }
 
     // Iniciar grabación
+    // Iniciar grabación con mejor compatibilidad
     startRecording(cameraId) {
         const camera = this.cameras.get(cameraId);
         if (!camera) throw new Error('Cámara no encontrada');
@@ -45,16 +46,30 @@ export class CameraManager {
 
         const ffmpeg = spawn('ffmpeg', [
             '-i', camera.rtspUrl,
-            '-c', 'copy',
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-profile:v', 'high',
+            '-level', '4.0',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac',
+            '-ar', '44100',
+            '-ac', '2',
+            '-movflags', '+faststart',
             '-f', 'segment',
             '-segment_time', '300', // 5 minutos por segmento
             '-segment_format', 'mp4',
             '-reset_timestamps', '1',
+            '-avoid_negative_ts', 'make_zero',
             outputPath
         ]);
 
         this.activeRecordings.set(cameraId, ffmpeg);
         camera.isRecording = true;
+
+        ffmpeg.stderr.on('data', (data) => {
+            console.log(`FFmpeg recording: ${data}`);
+        });
 
         ffmpeg.on('error', (error) => {
             console.error(`Error en grabación cámara ${cameraId}:`, error);
@@ -68,7 +83,6 @@ export class CameraManager {
 
         return { status: 'started', filename };
     }
-
     // Detener grabación
     stopRecording(cameraId) {
         const process = this.activeRecordings.get(cameraId);

@@ -14,49 +14,45 @@ export default function handler(req, res) {
             return res.status(404).json({ error: 'Cámara no encontrada' });
         }
 
-        // Configurar headers para streaming
+        // Headers para MJPEG stream
         res.writeHead(200, {
-            'Content-Type': 'video/mp4',
+            'Content-Type': 'multipart/x-mixed-replace; boundary=--myboundary',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
             'Access-Control-Allow-Origin': '*',
         });
 
-        // Convertir RTSP a HTTP stream usando FFmpeg optimizado para navegadores
+        // Convertir RTSP a MJPEG
         const ffmpeg = spawn('ffmpeg', [
             '-i', camera.rtspUrl,
-            '-c:v', 'libx264',
-            '-preset', 'ultrafast',
-            '-tune', 'zerolatency',
-            '-profile:v', 'baseline',
-            '-level', '3.0',
-            '-pix_fmt', 'yuv420p',
-            '-c:a', 'aac',
-            '-ar', '22050',
-            '-ac', '2',
-            '-f', 'mp4',
-            '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-            '-frag_duration', '1000000',
-            '-avoid_negative_ts', 'make_zero',
+            '-c:v', 'mjpeg',
+            '-q:v', '5',
+            '-r', '10', // 10 fps
+            '-s', '640x480',
+            '-f', 'mjpeg',
             '-'
         ]);
 
-        // Pipe el output de FFmpeg a la respuesta HTTP
-        ffmpeg.stdout.pipe(res);
+        // Enviar frames MJPEG
+        ffmpeg.stdout.on('data', (chunk) => {
+            res.write(`--myboundary\r\n`);
+            res.write(`Content-Type: image/jpeg\r\n`);
+            res.write(`Content-Length: ${chunk.length}\r\n\r\n`);
+            res.write(chunk);
+            res.write('\r\n');
+        });
 
-        // Manejar errores
         ffmpeg.stderr.on('data', (data) => {
-            console.error(`FFmpeg stderr: ${data}`);
+            console.error(`FFmpeg MJPEG: ${data}`);
         });
 
         ffmpeg.on('close', (code) => {
-            console.log(`FFmpeg process closed with code ${code}`);
+            console.log(`MJPEG stream closed: ${code}`);
             if (!res.headersSent) {
                 res.end();
             }
         });
 
-        // Limpiar cuando el cliente se desconecta
         req.on('close', () => {
             ffmpeg.kill('SIGTERM');
         });
