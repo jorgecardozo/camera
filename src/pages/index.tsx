@@ -1,115 +1,197 @@
-import Image from "next/image";
-import { Geist, Geist_Mono } from "next/font/google";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import { useState, useEffect } from 'react';
+import Head from 'next/head';
+import CameraStream from '../components/CameraStream';
+import CameraSetup from '../components/CameraSetup';
+import FilesViewer from '../components/FilesViewer';
+import { Shield, Video, Camera, Settings, Files } from 'lucide-react';
 
 export default function Home() {
+  const [cameras, setCameras] = useState([]);
+  const [activeTab, setActiveTab] = useState('cameras');
+  const [loading, setLoading] = useState(true);
+
+  const fetchCameras = async () => {
+    try {
+      const response = await fetch('/api/cameras');
+      const data = await response.json();
+      setCameras(data.cameras || []);
+    } catch (error) {
+      console.error('Error al cargar cámaras:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCameras();
+    // Actualizar cada 10 segundos
+    const interval = setInterval(fetchCameras, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleCameraAdded = () => {
+    fetchCameras();
+    setActiveTab('cameras');
+  };
+
   return (
-    <div
-      className={`${geistSans.className} ${geistMono.className} font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20`}
-    >
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/pages/index.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+    <>
+      <Head>
+        <title>Sistema de Vigilancia - 4 Cámaras</title>
+        <meta name="description" content="Sistema de vigilancia con 4 cámaras IP" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="/favicon.ico" />
+      </Head>
+
+      <div className="min-h-screen bg-gray-100">
+        {/* Header */}
+        <header className="bg-white shadow-sm border-b">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center py-4">
+              <div className="flex items-center space-x-3">
+                <Shield className="w-8 h-8 text-blue-600" />
+                <h1 className="text-2xl font-bold text-gray-900">
+                  Sistema de Vigilancia
+                </h1>
+              </div>
+              <div className="flex items-center space-x-4">
+                <div className="text-sm text-gray-600">
+                  {cameras.length} cámaras configuradas
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-sm text-gray-600">En línea</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Navigation */}
+        <nav className="bg-white shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex space-x-8">
+              <button
+                onClick={() => setActiveTab('cameras')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'cameras'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+              >
+                <Video className="w-4 h-4 inline mr-2" />
+                Vista de Cámaras
+              </button>
+              <button
+                onClick={() => setActiveTab('setup')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'setup'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+              >
+                <Settings className="w-4 h-4 inline mr-2" />
+                Configuración
+              </button>
+              <button
+                onClick={() => setActiveTab('files')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'files'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+              >
+                <Files className="w-4 h-4 inline mr-2" />
+                Archivos
+              </button>
+            </div>
+          </div>
+        </nav>
+
+        {/* Main Content */}
+        <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+          {activeTab === 'cameras' && (
+            <div>
+              {loading ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+                  <p className="mt-4 text-gray-600">Cargando cámaras...</p>
+                </div>
+              ) : cameras.length > 0 ? (
+                <>
+                  <div className="mb-6">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                      Vista en Tiempo Real
+                    </h2>
+                    <p className="text-gray-600">
+                      Controla tus {cameras.length} cámaras, graba video y toma capturas
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {cameras.map((camera: any) => (
+                      <CameraStream
+                        key={camera.id}
+                        camera={camera}
+                        onUpdate={fetchCameras}
+                      />
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-12">
+                  <Camera className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    No hay cámaras configuradas
+                  </h3>
+                  <p className="text-gray-600 mb-6">
+                    Agrega tus primeras cámaras para comenzar la vigilancia
+                  </p>
+                  <button
+                    onClick={() => setActiveTab('setup')}
+                    className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                  >
+                    Configurar Cámaras
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'setup' && (
+            <div>
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                  Configuración de Cámaras
+                </h2>
+                <p className="text-gray-600">
+                  Agrega y configura tus cámaras IP para el sistema de vigilancia
+                </p>
+              </div>
+              <CameraSetup onCameraAdded={handleCameraAdded} />
+            </div>
+          )}
+
+          {activeTab === 'files' && (
+            <div>
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                  Archivo de Grabaciones
+                </h2>
+                <p className="text-gray-600">
+                  Revisa, descarga y gestiona todas tus grabaciones y capturas
+                </p>
+              </div>
+              <FilesViewer />
+            </div>
+          )}
+        </main>
+
+        {/* Footer */}
+        <footer className="bg-white border-t mt-12">
+          <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
+            <div className="text-center text-sm text-gray-500">
+              Sistema de Vigilancia © 2025 - Desarrollado con Next.js
+            </div>
+          </div>
+        </footer>
+      </div>
+    </>
+  )
 }
