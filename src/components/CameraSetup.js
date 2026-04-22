@@ -1,40 +1,42 @@
 import { useState } from 'react';
-import { Plus, Wifi, Settings, Search } from 'lucide-react';
+import { Plus, Wifi, Settings, Search, Zap, X } from 'lucide-react';
+
+// Generate a short camera ID from an IP address last octet.
+function idFromIp(ip) {
+    const last = ip.split('.').pop();
+    return `cam${last}`;
+}
 
 export default function CameraSetup({ onCameraAdded }) {
-    const [showForm, setShowForm] = useState(false);
-    const [formData, setFormData] = useState({
-        id: '',
-        name: '',
-        ip: '',
-        port: '554',
-        httpPort: '80',
-        username: '',
-        password: '',
-        rtspPath: '/live',
-        continuousRecord: false,
+    const [showForm, setShowForm]     = useState(false);
+    const [formData, setFormData]     = useState({
+        id: '', name: '', ip: '', port: '554', httpPort: '80',
+        username: '', password: '', rtspPath: '/live', continuousRecord: false,
     });
-    const [isLoading, setIsLoading] = useState(false);
-    const [message, setMessage] = useState('');
-    const [scanning, setScanning] = useState(false);
+    const [isLoading, setIsLoading]   = useState(false);
+    const [message, setMessage]       = useState('');
+    const [scanning, setScanning]     = useState(false);
     const [scanResults, setScanResults] = useState([]);
-    const [scanError, setScanError] = useState('');
+    const [scanError, setScanError]   = useState('');
+    // IP of the scan result that has the quick-connect form open
+    const [expandedIp, setExpandedIp] = useState(null);
+    const [quickForm, setQuickForm]   = useState({});
+    const [addedIps, setAddedIps]     = useState(new Set());
+
+    // ── Full form ────────────────────────────────────────────────────────────
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setIsLoading(true);
         setMessage('');
-
         try {
-            const response = await fetch('/api/cameras', {
+            const res = await fetch('/api/cameras', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData),
             });
-
-            const result = await response.json();
-
-            if (response.ok) {
+            const result = await res.json();
+            if (res.ok) {
                 setMessage('Cámara agregada exitosamente');
                 setFormData({
                     id: '', name: '', ip: '', port: '554', httpPort: '80',
@@ -45,8 +47,8 @@ export default function CameraSetup({ onCameraAdded }) {
             } else {
                 setMessage(`Error: ${result.error}`);
             }
-        } catch (error) {
-            setMessage(`Error: ${error.message}`);
+        } catch (err) {
+            setMessage(`Error: ${err.message}`);
         } finally {
             setIsLoading(false);
             setTimeout(() => setMessage(''), 5000);
@@ -58,26 +60,68 @@ export default function CameraSetup({ onCameraAdded }) {
         setFormData({ ...formData, [name]: type === 'checkbox' ? checked : value });
     };
 
-    const presetCameras = [
-        { id: 'cam1', name: 'Cámara Entrada',   ip: '192.168.1.101', username: 'admin', password: '' },
-        { id: 'cam2', name: 'Cámara Sala',      ip: '192.168.1.102', username: 'admin', password: '' },
-        { id: 'cam3', name: 'Cámara Cocina',    ip: '192.168.1.103', username: 'admin', password: '' },
-        { id: 'cam4', name: 'Cámara Exterior',  ip: '192.168.1.104', username: 'admin', password: '' },
-    ];
+    // ── Quick-connect (inline form for RTSP scan results) ────────────────────
 
-    const addPresetCamera = (preset) => {
-        setFormData({ ...formData, ...preset, port: '554', httpPort: '80', rtspPath: '/live' });
-        setShowForm(true);
+    const openQuickForm = (result) => {
+        setExpandedIp(result.ip);
+        setQuickForm({
+            name:     `Cámara ${result.ip.split('.').pop()}`,
+            username: '',
+            password: '',
+            rtspPath: '/live',
+        });
     };
+
+    const handleQuickChange = (e) => {
+        setQuickForm({ ...quickForm, [e.target.name]: e.target.value });
+    };
+
+    const handleQuickSubmit = async (result) => {
+        setIsLoading(true);
+        try {
+            const payload = {
+                id:       idFromIp(result.ip),
+                name:     quickForm.name,
+                ip:       result.ip,
+                port:     result.rtspPort || 554,
+                httpPort: result.httpPort || 80,
+                username: quickForm.username,
+                password: quickForm.password,
+                rtspPath: quickForm.rtspPath,
+                continuousRecord: false,
+            };
+            const res = await fetch('/api/cameras', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setAddedIps(prev => new Set([...prev, result.ip]));
+                setExpandedIp(null);
+                onCameraAdded?.();
+            } else {
+                alert(`Error: ${data.error}`);
+            }
+        } catch (err) {
+            alert(`Error: ${err.message}`);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // ── Scan ─────────────────────────────────────────────────────────────────
 
     const handleScan = async () => {
         setScanning(true);
         setScanResults([]);
         setScanError('');
+        setExpandedIp(null);
+        setAddedIps(new Set());
         try {
-            const response = await fetch('/api/cameras/scan');
-            const result = await response.json();
-            if (response.ok) {
+            const res    = await fetch('/api/cameras/scan');
+            const result = await res.json();
+            if (res.ok) {
                 setScanResults(result.found);
                 if (result.found.length === 0) {
                     const subnets = result.subnets?.join(', ') || result.subnet;
@@ -86,8 +130,8 @@ export default function CameraSetup({ onCameraAdded }) {
             } else {
                 setScanError('Error al escanear la red');
             }
-        } catch (error) {
-            setScanError(`Error: ${error.message}`);
+        } catch (err) {
+            setScanError(`Error: ${err.message}`);
         } finally {
             setScanning(false);
         }
@@ -96,15 +140,20 @@ export default function CameraSetup({ onCameraAdded }) {
     const applyScannedIp = (result) => {
         setFormData({
             ...formData,
-            ip: result.ip,
-            port: result.rtspPort ? String(result.rtspPort) : '554',
+            ip:       result.ip,
+            port:     result.rtspPort ? String(result.rtspPort) : '554',
             httpPort: result.httpPort ? String(result.httpPort) : '80',
         });
         setShowForm(true);
+        setExpandedIp(null);
     };
 
-    const inputCls = "w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 transition-colors placeholder:text-slate-500";
-    const labelCls = "text-slate-300 text-sm font-medium mb-1 block";
+    const inputCls  = "w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 transition-colors placeholder:text-slate-500";
+    const labelCls  = "text-slate-300 text-sm font-medium mb-1 block";
+    const qInputCls = "w-full bg-slate-800 border border-slate-600 text-slate-100 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder:text-slate-500";
+
+    const rtspResults    = scanResults.filter(r => r.rtspPort);
+    const nonRtspResults = scanResults.filter(r => !r.rtspPort);
 
     return (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6">
@@ -123,32 +172,12 @@ export default function CameraSetup({ onCameraAdded }) {
                         {scanning ? 'Escaneando...' : 'Escanear Red'}
                     </button>
                     <button
-                        onClick={() => setShowForm(!showForm)}
+                        onClick={() => { setShowForm(!showForm); setExpandedIp(null); }}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
                     >
                         <Plus className="w-4 h-4" />
                         Agregar Cámara
                     </button>
-                </div>
-            </div>
-
-            {/* Quick presets */}
-            <div className="mb-6">
-                <h3 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
-                    <Wifi className="w-4 h-4" />
-                    Configuraciones Rápidas
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {presetCameras.map((preset) => (
-                        <button
-                            key={preset.id}
-                            onClick={() => addPresetCamera(preset)}
-                            className="p-3 bg-slate-900 border border-slate-600 rounded-lg hover:border-slate-500 hover:bg-slate-900/70 text-left transition-colors"
-                        >
-                            <div className="font-medium text-slate-200 text-sm">{preset.name}</div>
-                            <div className="text-xs text-slate-500 mt-0.5">{preset.ip} — completar credenciales</div>
-                        </button>
-                    ))}
                 </div>
             </div>
 
@@ -159,30 +188,156 @@ export default function CameraSetup({ onCameraAdded }) {
                         <Search className="w-4 h-4" />
                         Dispositivos Encontrados
                     </h3>
+
                     {scanError && (
                         <div className="p-3 bg-amber-900/30 border border-amber-700/50 rounded-lg text-amber-300 text-sm">
                             {scanError}
                         </div>
                     )}
-                    {scanResults.length > 0 && (
+
+                    {/* RTSP devices — quick connect */}
+                    {rtspResults.length > 0 && (
+                        <div className="space-y-2 mb-3">
+                            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">
+                                Cámaras detectadas (RTSP)
+                            </p>
+                            {rtspResults.map((result) => {
+                                const added    = addedIps.has(result.ip);
+                                const expanded = expandedIp === result.ip;
+
+                                return (
+                                    <div
+                                        key={result.ip}
+                                        className={`border rounded-xl overflow-hidden transition-colors ${
+                                            added
+                                                ? 'bg-green-900/20 border-green-700/50'
+                                                : 'bg-slate-900 border-slate-600'
+                                        }`}
+                                    >
+                                        {/* Row */}
+                                        <div className="flex items-center justify-between px-3 py-2.5">
+                                            <div>
+                                                <span className="font-mono font-medium text-slate-100">{result.ip}</span>
+                                                <div className="text-xs text-slate-500 mt-0.5">
+                                                    <span className="text-blue-400 font-medium mr-2">RTSP :{result.rtspPort}</span>
+                                                    {result.httpPort && <span>HTTP :{result.httpPort}</span>}
+                                                </div>
+                                            </div>
+
+                                            {added ? (
+                                                <span className="text-green-400 text-sm font-medium">Agregada</span>
+                                            ) : expanded ? (
+                                                <button
+                                                    onClick={() => setExpandedIp(null)}
+                                                    className="text-slate-400 hover:text-slate-200 transition-colors"
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={() => openQuickForm(result)}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
+                                                >
+                                                    <Zap className="w-3.5 h-3.5" />
+                                                    Agregar
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        {/* Inline quick-connect form */}
+                                        {expanded && (
+                                            <div className="border-t border-slate-700 px-3 py-3 bg-slate-950/40">
+                                                <div className="grid grid-cols-2 gap-2 mb-2">
+                                                    <div className="col-span-2">
+                                                        <label className="text-slate-400 text-xs mb-1 block">Nombre</label>
+                                                        <input
+                                                            type="text"
+                                                            name="name"
+                                                            value={quickForm.name}
+                                                            onChange={handleQuickChange}
+                                                            className={qInputCls}
+                                                            placeholder="Cámara Entrada"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-slate-400 text-xs mb-1 block">Usuario</label>
+                                                        <input
+                                                            type="text"
+                                                            name="username"
+                                                            value={quickForm.username}
+                                                            onChange={handleQuickChange}
+                                                            className={qInputCls}
+                                                            placeholder="admin"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-slate-400 text-xs mb-1 block">Contraseña</label>
+                                                        <input
+                                                            type="password"
+                                                            name="password"
+                                                            value={quickForm.password}
+                                                            onChange={handleQuickChange}
+                                                            className={qInputCls}
+                                                            placeholder="••••••"
+                                                        />
+                                                    </div>
+                                                    <div className="col-span-2">
+                                                        <label className="text-slate-400 text-xs mb-1 block">Ruta RTSP</label>
+                                                        <input
+                                                            type="text"
+                                                            name="rtspPath"
+                                                            value={quickForm.rtspPath}
+                                                            onChange={handleQuickChange}
+                                                            className={qInputCls}
+                                                            placeholder="/live"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={() => handleQuickSubmit(result)}
+                                                        disabled={isLoading}
+                                                        className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
+                                                    >
+                                                        {isLoading ? 'Conectando...' : 'Conectar'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setExpandedIp(null)}
+                                                        className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm transition-colors"
+                                                    >
+                                                        Cancelar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {/* Non-RTSP devices */}
+                    {nonRtspResults.length > 0 && (
                         <div className="space-y-2">
-                            {scanResults.map((result) => (
+                            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">
+                                Otros dispositivos (sin RTSP)
+                            </p>
+                            {nonRtspResults.map((result) => (
                                 <div
                                     key={result.ip}
-                                    className="flex items-center justify-between p-3 bg-slate-900 border border-slate-600 rounded-lg"
+                                    className="flex items-center justify-between p-3 bg-slate-900 border border-slate-700 rounded-lg"
                                 >
                                     <div>
-                                        <span className="font-mono font-medium text-slate-100">{result.ip}</span>
-                                        <div className="text-xs text-slate-500 mt-0.5">
-                                            {result.rtspPort && <span className="mr-3">RTSP :{result.rtspPort}</span>}
+                                        <span className="font-mono text-slate-400">{result.ip}</span>
+                                        <div className="text-xs text-slate-600 mt-0.5">
                                             {result.httpPort && <span>HTTP :{result.httpPort}</span>}
                                         </div>
                                     </div>
                                     <button
                                         onClick={() => applyScannedIp(result)}
-                                        className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm transition-colors"
+                                        className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-xs transition-colors"
                                     >
-                                        Usar esta IP
+                                        Usar IP
                                     </button>
                                 </div>
                             ))}
@@ -191,7 +346,7 @@ export default function CameraSetup({ onCameraAdded }) {
                 </div>
             )}
 
-            {/* Form */}
+            {/* Full form */}
             {showForm && (
                 <form onSubmit={handleSubmit} className="space-y-4 pt-4 border-t border-slate-700">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -228,16 +383,15 @@ export default function CameraSetup({ onCameraAdded }) {
                         <div>
                             <label className={labelCls}>Usuario</label>
                             <input type="text" name="username" value={formData.username} onChange={handleChange}
-                                placeholder="admin" required className={inputCls} />
+                                placeholder="(vacío si no requiere)" className={inputCls} />
                         </div>
                         <div>
                             <label className={labelCls}>Contraseña</label>
                             <input type="password" name="password" value={formData.password} onChange={handleChange}
-                                placeholder="contraseña" required className={inputCls} />
+                                placeholder="(vacío si no requiere)" className={inputCls} />
                         </div>
                     </div>
 
-                    {/* Continuous recording toggle */}
                     <label className="flex items-center gap-3 p-3 bg-slate-900 border border-slate-700 rounded-lg cursor-pointer hover:border-slate-600 transition-colors">
                         <input
                             type="checkbox"
@@ -253,18 +407,12 @@ export default function CameraSetup({ onCameraAdded }) {
                     </label>
 
                     <div className="flex gap-3">
-                        <button
-                            type="submit"
-                            disabled={isLoading}
-                            className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
-                        >
+                        <button type="submit" disabled={isLoading}
+                            className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-40">
                             {isLoading ? 'Agregando...' : 'Agregar Cámara'}
                         </button>
-                        <button
-                            type="button"
-                            onClick={() => setShowForm(false)}
-                            className="px-5 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium transition-colors"
-                        >
+                        <button type="button" onClick={() => setShowForm(false)}
+                            className="px-5 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium transition-colors">
                             Cancelar
                         </button>
                     </div>

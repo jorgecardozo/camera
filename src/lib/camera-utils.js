@@ -5,6 +5,15 @@ import './retention'; // register startup cleanup + hourly interval
 
 const CAMERAS_FILE = path.join(process.cwd(), 'cameras.json');
 
+function buildRtspUrl(config) {
+    const host = `${config.ip}:${config.port || 554}`;
+    const path_ = config.rtspPath || '/live';
+    const user  = config.username || '';
+    const pass  = config.password || '';
+    if (user || pass) return `rtsp://${user}:${pass}@${host}${path_}`;
+    return `rtsp://${host}${path_}`;
+}
+
 export class CameraManager {
     constructor() {
         this.cameras = this._load();
@@ -42,7 +51,7 @@ export class CameraManager {
             username: config.username,
             password: config.password,
             httpPort: config.httpPort || 80,
-            rtspUrl: `rtsp://${config.username}:${config.password}@${config.ip}:${config.port || 554}${config.rtspPath || '/live'}`,
+            rtspUrl: buildRtspUrl(config),
             httpUrl: `http://${config.ip}:${config.httpPort || 80}`,
             isRecording: false,
             continuousRecord: !!config.continuousRecord,
