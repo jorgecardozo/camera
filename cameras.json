@@ -1,14 +1,30 @@
 [
   {
-    "id": "cam3",
-    "name": "Cámara Cocina",
+    "id": "cam106",
+    "name": "Cámara 106",
+    "ip": "192.168.68.106",
+    "port": 554,
+    "username": "",
+    "password": "",
+    "httpPort": 80,
+    "rtspUrl": "rtsp://192.168.68.106:554/live",
+    "httpUrl": "http://192.168.68.106:80",
+    "isRecording": false,
+    "continuousRecord": false,
+    "lastScreenshot": null
+  },
+  {
+    "id": "cam103",
+    "name": "Cámara 103",
     "ip": "192.168.68.103",
-    "port": "554",
-    "username": "admin",
-    "password": "admin123",
-    "httpPort": "80",
-    "rtspUrl": "rtsp://admin:admin123@192.168.68.103:554/live",
+    "port": 554,
+    "username": "",
+    "password": "",
+    "httpPort": 80,
+    "rtspUrl": "rtsp://192.168.68.103:554/live",
     "httpUrl": "http://192.168.68.103:80",
+    "isRecording": false,
+    "continuousRecord": false,
     "lastScreenshot": null
   }
 ]

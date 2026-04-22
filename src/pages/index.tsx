@@ -87,10 +87,10 @@ export default function Home() {
           </div>
         </nav>
 
-        {/* Content — all tabs stay mounted so state (e.g. scan results) survives tab switches */}
+        {/* Content — setup stays mounted (preserves scan results); cameras unmounts to stop streams */}
         <main className="max-w-screen-xl mx-auto px-4 py-6">
-          <div className={activeTab === 'cameras' ? '' : 'hidden'}>
-            {loading ? (
+          {activeTab === 'cameras' && (
+            loading ? (
               <div className="flex flex-col items-center justify-center py-24 gap-4">
                 <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                 <p className="text-slate-400">Conectando cámaras...</p>
@@ -117,16 +117,14 @@ export default function Home() {
                   Ir a Configuración
                 </button>
               </div>
-            )}
-          </div>
+            )
+          )}
 
           <div className={activeTab === 'setup' ? '' : 'hidden'}>
             <CameraSetup cameras={cameras} onCameraAdded={() => { fetchCameras(); setActiveTab('cameras'); }} />
           </div>
 
-          <div className={activeTab === 'files' ? '' : 'hidden'}>
-            <FilesViewer />
-          </div>
+          {activeTab === 'files' && <FilesViewer />}
         </main>
       </div>
     </>
