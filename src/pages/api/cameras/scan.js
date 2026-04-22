@@ -36,7 +36,7 @@ function getNetworkRanges() {
     return ranges.length > 0 ? ranges : ['192.168.1'];
 }
 
-function checkPort(host, port, timeout = 1500) {
+function checkPort(host, port, timeout = 800) {
     return new Promise((resolve) => {
         const s = new net.Socket();
         let done = false;
