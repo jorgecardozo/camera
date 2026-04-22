@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Camera, Video, Square, ChevronDown, ChevronUp, Move } from 'lucide-react';
+import { Camera, Video, Square, ChevronDown, ChevronUp, Move, Trash2 } from 'lucide-react';
 
 export default function CameraStream({ camera, onUpdate }) {
     const [isLoading, setIsLoading] = useState(false);
     const [lastAction, setLastAction] = useState('');
     const [showPTZ, setShowPTZ] = useState(false);
+    const [confirmDelete, setConfirmDelete] = useState(false);
 
     const notify = (msg, duration = 3000) => {
         setLastAction(msg);
@@ -40,6 +41,20 @@ export default function CameraStream({ camera, onUpdate }) {
             if (res.ok) onUpdate?.();
         } catch (e) {
             notify(`Error: ${e.message}`);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!confirmDelete) { setConfirmDelete(true); return; }
+        setIsLoading(true);
+        try {
+            await fetch(`/api/cameras/${camera.id}`, { method: 'DELETE' });
+            onUpdate?.();
+        } catch (e) {
+            notify(`Error: ${e.message}`);
+            setConfirmDelete(false);
         } finally {
             setIsLoading(false);
         }
@@ -141,6 +156,32 @@ export default function CameraStream({ camera, onUpdate }) {
                     PTZ
                     {showPTZ ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                 </button>
+
+                {confirmDelete ? (
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={handleDelete}
+                            disabled={isLoading}
+                            className="px-2.5 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-medium transition-colors disabled:opacity-40"
+                        >
+                            Confirmar
+                        </button>
+                        <button
+                            onClick={() => setConfirmDelete(false)}
+                            className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-xs transition-colors"
+                        >
+                            No
+                        </button>
+                    </div>
+                ) : (
+                    <button
+                        onClick={handleDelete}
+                        className="p-1.5 text-slate-600 hover:text-red-400 transition-colors"
+                        title="Eliminar cámara"
+                    >
+                        <Trash2 size={15} />
+                    </button>
+                )}
             </div>
 
             {/* Status bar */}

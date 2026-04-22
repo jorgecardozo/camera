@@ -60,6 +60,11 @@ export class CameraManager {
         this._save();
     }
 
+    removeCamera(id) {
+        this.cameras.delete(id);
+        this._save();
+    }
+
     getAllCameras() {
         return Array.from(this.cameras.values());
     }
