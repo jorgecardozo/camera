@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Wifi, Settings } from 'lucide-react';
+import { Plus, Wifi, Settings, Search } from 'lucide-react';
 
 export default function CameraSetup({ onCameraAdded }) {
     const [showForm, setShowForm] = useState(false);
@@ -10,10 +10,14 @@ export default function CameraSetup({ onCameraAdded }) {
         port: '554',
         httpPort: '80',
         username: '',
-        password: ''
+        password: '',
+        rtspPath: '/live'
     });
     const [isLoading, setIsLoading] = useState(false);
     const [message, setMessage] = useState('');
+    const [scanning, setScanning] = useState(false);
+    const [scanResults, setScanResults] = useState([]);
+    const [scanError, setScanError] = useState('');
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -38,7 +42,8 @@ export default function CameraSetup({ onCameraAdded }) {
                     port: '554',
                     httpPort: '80',
                     username: '',
-                    password: ''
+                    password: '',
+                    rtspPath: '/live'
                 });
                 setShowForm(false);
                 onCameraAdded && onCameraAdded();
@@ -96,30 +101,79 @@ export default function CameraSetup({ onCameraAdded }) {
             ...formData,
             ...preset,
             port: '554',
-            httpPort: '80'
+            httpPort: '80',
+            rtspPath: '/live'
         });
     };
 
+    const handleScan = async () => {
+        setScanning(true);
+        setScanResults([]);
+        setScanError('');
+
+        try {
+            const response = await fetch('/api/cameras/scan');
+            const result = await response.json();
+
+            if (response.ok) {
+                setScanResults(result.found);
+                if (result.found.length === 0) {
+                    const subnets = result.subnets?.join(', ') || result.subnet;
+                    setScanError(`No se encontraron dispositivos en ${subnets}.x`);
+                }
+            } else {
+                setScanError('Error al escanear la red');
+            }
+        } catch (error) {
+            setScanError(`Error: ${error.message}`);
+        } finally {
+            setScanning(false);
+        }
+    };
+
+    const applyScannedIp = (result) => {
+        setFormData({
+            ...formData,
+            ip: result.ip,
+            port: result.rtspPort ? String(result.rtspPort) : '554',
+            httpPort: result.httpPort ? String(result.httpPort) : '80',
+        });
+        setShowForm(true);
+    };
+
+    const inputCls = "w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 transition-colors placeholder:text-slate-500";
+    const labelCls = "text-slate-300 text-sm font-medium mb-1 block";
+
     return (
-        <div className="bg-white p-6 rounded-lg shadow-lg">
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-6">
             <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold flex items-center gap-2">
-                    <Settings className="w-6 h-6" />
+                <h2 className="text-xl font-semibold text-slate-100 flex items-center gap-2">
+                    <Settings className="w-5 h-5 text-blue-400" />
                     Configuración de Cámaras
                 </h2>
-                <button
-                    onClick={() => setShowForm(!showForm)}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                >
-                    <Plus className="w-4 h-4" />
-                    Agregar Cámara
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={handleScan}
+                        disabled={scanning}
+                        className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm transition-colors disabled:opacity-40"
+                    >
+                        <Search className="w-4 h-4" />
+                        {scanning ? 'Escaneando...' : 'Escanear Red'}
+                    </button>
+                    <button
+                        onClick={() => setShowForm(!showForm)}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Agregar Cámara
+                    </button>
+                </div>
             </div>
 
             {/* Cámaras preset */}
             <div className="mb-6">
-                <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                    <Wifi className="w-5 h-5" />
+                <h3 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                    <Wifi className="w-4 h-4" />
                     Configuraciones Rápidas
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -127,21 +181,62 @@ export default function CameraSetup({ onCameraAdded }) {
                         <button
                             key={preset.id}
                             onClick={() => addPresetCamera(preset)}
-                            className="p-3 border border-gray-300 rounded hover:bg-gray-50 text-left"
+                            className="p-3 bg-slate-900 border border-slate-600 rounded-lg hover:border-slate-500 hover:bg-slate-900/70 text-left transition-colors"
                         >
-                            <div className="font-medium">{preset.name}</div>
-                            <div className="text-sm text-gray-500">{preset.ip}</div>
+                            <div className="font-medium text-slate-200 text-sm">{preset.name}</div>
+                            <div className="text-xs text-slate-500 mt-0.5">{preset.ip}</div>
                         </button>
                     ))}
                 </div>
             </div>
 
+            {/* Resultados del escaneo */}
+            {(scanResults.length > 0 || scanError) && (
+                <div className="mb-6">
+                    <h3 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                        <Search className="w-4 h-4" />
+                        Dispositivos Encontrados
+                    </h3>
+
+                    {scanError && (
+                        <div className="p-3 bg-amber-900/30 border border-amber-700/50 rounded-lg text-amber-300 text-sm">
+                            {scanError}
+                        </div>
+                    )}
+
+                    {scanResults.length > 0 && (
+                        <div className="space-y-2">
+                            {scanResults.map((result) => (
+                                <div
+                                    key={result.ip}
+                                    className="flex items-center justify-between p-3 bg-slate-900 border border-slate-600 rounded-lg"
+                                >
+                                    <div>
+                                        <span className="font-mono font-medium text-slate-100">{result.ip}</span>
+                                        <div className="text-xs text-slate-500 mt-0.5">
+                                            {result.rtspPort && <span className="mr-3">RTSP :{result.rtspPort}</span>}
+                                            {result.httpPort && <span>HTTP :{result.httpPort}</span>}
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => applyScannedIp(result)}
+                                        className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm transition-colors"
+                                    >
+                                        Usar esta IP
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Formulario */}
             {showForm && (
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <form onSubmit={handleSubmit} className="space-y-4 pt-4 border-t border-slate-700">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium mb-1">ID de Cámara</label>
+                            <label className={labelCls}>ID de Cámara</label>
                             <input
                                 type="text"
                                 name="id"
@@ -149,12 +244,12 @@ export default function CameraSetup({ onCameraAdded }) {
                                 onChange={handleChange}
                                 placeholder="ej: cam1"
                                 required
-                                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className={inputCls}
                             />
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-1">Nombre</label>
+                            <label className={labelCls}>Nombre</label>
                             <input
                                 type="text"
                                 name="name"
@@ -162,12 +257,12 @@ export default function CameraSetup({ onCameraAdded }) {
                                 onChange={handleChange}
                                 placeholder="ej: Cámara Entrada"
                                 required
-                                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className={inputCls}
                             />
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-1">Dirección IP</label>
+                            <label className={labelCls}>Dirección IP</label>
                             <input
                                 type="text"
                                 name="ip"
@@ -175,36 +270,48 @@ export default function CameraSetup({ onCameraAdded }) {
                                 onChange={handleChange}
                                 placeholder="192.168.1.100"
                                 required
-                                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className={inputCls}
                             />
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-1">Puerto RTSP</label>
+                            <label className={labelCls}>Puerto RTSP</label>
                             <input
                                 type="number"
                                 name="port"
                                 value={formData.port}
                                 onChange={handleChange}
                                 placeholder="554"
-                                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className={inputCls}
                             />
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-1">Puerto HTTP</label>
+                            <label className={labelCls}>Puerto HTTP</label>
                             <input
                                 type="number"
                                 name="httpPort"
                                 value={formData.httpPort}
                                 onChange={handleChange}
                                 placeholder="80"
-                                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className={inputCls}
                             />
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-1">Usuario</label>
+                            <label className={labelCls}>Ruta RTSP</label>
+                            <input
+                                type="text"
+                                name="rtspPath"
+                                value={formData.rtspPath}
+                                onChange={handleChange}
+                                placeholder="/live"
+                                className={inputCls}
+                            />
+                        </div>
+
+                        <div>
+                            <label className={labelCls}>Usuario</label>
                             <input
                                 type="text"
                                 name="username"
@@ -212,12 +319,12 @@ export default function CameraSetup({ onCameraAdded }) {
                                 onChange={handleChange}
                                 placeholder="admin"
                                 required
-                                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className={inputCls}
                             />
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-1">Contraseña</label>
+                            <label className={labelCls}>Contraseña</label>
                             <input
                                 type="password"
                                 name="password"
@@ -225,7 +332,7 @@ export default function CameraSetup({ onCameraAdded }) {
                                 onChange={handleChange}
                                 placeholder="contraseña"
                                 required
-                                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className={inputCls}
                             />
                         </div>
                     </div>
@@ -234,14 +341,14 @@ export default function CameraSetup({ onCameraAdded }) {
                         <button
                             type="submit"
                             disabled={isLoading}
-                            className="px-6 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
+                            className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
                         >
                             {isLoading ? 'Agregando...' : 'Agregar Cámara'}
                         </button>
                         <button
                             type="button"
                             onClick={() => setShowForm(false)}
-                            className="px-6 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+                            className="px-5 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium transition-colors"
                         >
                             Cancelar
                         </button>
@@ -251,9 +358,9 @@ export default function CameraSetup({ onCameraAdded }) {
 
             {/* Mensaje */}
             {message && (
-                <div className={`mt-4 p-3 rounded ${message.includes('Error')
-                    ? 'bg-red-100 text-red-700'
-                    : 'bg-green-100 text-green-700'
+                <div className={`mt-4 p-3 rounded-lg text-sm ${message.includes('Error')
+                    ? 'bg-red-900/30 border border-red-700/50 text-red-300'
+                    : 'bg-green-900/30 border border-green-700/50 text-green-300'
                     }`}>
                     {message}
                 </div>

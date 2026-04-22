@@ -1,256 +1,169 @@
-import { useState, useRef, useEffect } from 'react';
-import { Camera, Video, Square, RotateCcw } from 'lucide-react';
+import { useState } from 'react';
+import { Camera, Video, Square, ChevronDown, ChevronUp, Move } from 'lucide-react';
 
 export default function CameraStream({ camera, onUpdate }) {
     const [isLoading, setIsLoading] = useState(false);
     const [lastAction, setLastAction] = useState('');
-    const [streamUrl, setStreamUrl] = useState('');
-    const videoRef = useRef(null);
+    const [showPTZ, setShowPTZ] = useState(false);
 
-    // Generar URL del stream HTTP
-    useEffect(() => {
-        if (camera && camera.id) {
-            setStreamUrl(`/api/cameras/${camera.id}/stream`);
-        }
-    }, [camera]);
+    const notify = (msg, duration = 3000) => {
+        setLastAction(msg);
+        if (duration) setTimeout(() => setLastAction(''), duration);
+    };
 
     const handleScreenshot = async () => {
         setIsLoading(true);
-        setLastAction('Tomando captura...');
-
+        notify('Tomando captura...', 0);
         try {
-            const response = await fetch(`/api/cameras/${camera.id}/screenshot`, {
-                method: 'POST'
-            });
-
-            const result = await response.json();
-
-            if (response.ok) {
-                setLastAction(`Captura guardada: ${result.filename}`);
-                onUpdate && onUpdate();
-            } else {
-                setLastAction(`Error: ${result.error}`);
-            }
-        } catch (error) {
-            setLastAction(`Error: ${error.message}`);
+            const res = await fetch(`/api/cameras/${camera.id}/screenshot`, { method: 'POST' });
+            const result = await res.json();
+            notify(res.ok ? `Captura guardada` : `Error: ${result.error}`);
+            if (res.ok) onUpdate?.();
+        } catch (e) {
+            notify(`Error: ${e.message}`);
         } finally {
             setIsLoading(false);
-            setTimeout(() => setLastAction(''), 3000);
         }
     };
 
     const handleRecording = async () => {
         setIsLoading(true);
-
+        notify(camera.isRecording ? 'Deteniendo...' : 'Iniciando grabación...', 0);
         try {
             const method = camera.isRecording ? 'DELETE' : 'POST';
-            const action = camera.isRecording ? 'Deteniendo...' : 'Iniciando grabación...';
-            setLastAction(action);
-
-            const response = await fetch(`/api/cameras/${camera.id}/recording`, {
-                method
-            });
-
-            const result = await response.json();
-
-            if (response.ok) {
-                setLastAction(camera.isRecording ? 'Grabación detenida' : 'Grabación iniciada');
-                onUpdate && onUpdate();
-            } else {
-                setLastAction(`Error: ${result.error}`);
-            }
-        } catch (error) {
-            setLastAction(`Error: ${error.message}`);
+            const res = await fetch(`/api/cameras/${camera.id}/recording`, { method });
+            const result = await res.json();
+            notify(res.ok
+                ? (camera.isRecording ? 'Grabación detenida' : 'Grabación iniciada')
+                : `Error: ${result.error}`
+            );
+            if (res.ok) onUpdate?.();
+        } catch (e) {
+            notify(`Error: ${e.message}`);
         } finally {
             setIsLoading(false);
-            setTimeout(() => setLastAction(''), 3000);
         }
     };
 
     const handlePTZ = async (action, preset = null) => {
         try {
-            const body = { action };
-            if (preset !== null) body.preset = preset;
-
-            const response = await fetch(`/api/cameras/${camera.id}/ptz`, {
+            const body = preset !== null ? { action, preset } : { action };
+            const res = await fetch(`/api/cameras/${camera.id}/ptz`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
             });
-
-            if (!response.ok) {
-                const error = await response.json();
-                setLastAction(`Error PTZ: ${error.error}`);
-                setTimeout(() => setLastAction(''), 3000);
+            if (!res.ok) {
+                const err = await res.json();
+                notify(`PTZ error: ${err.error}`);
             }
-        } catch (error) {
-            setLastAction(`Error PTZ: ${error.message}`);
-            setTimeout(() => setLastAction(''), 3000);
+        } catch (e) {
+            notify(`PTZ error: ${e.message}`);
         }
     };
 
     return (
-        <div className="border rounded-lg p-4 bg-white shadow-lg">
-            {/* Header */}
-            <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">{camera.name}</h3>
-                <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-500">{camera.ip}</span>
-                    <div className={`w-3 h-3 rounded-full ${camera.isRecording ? 'bg-red-500 animate-pulse' : 'bg-gray-300'}`}></div>
+        <div className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex flex-col">
+            {/* Video */}
+            <div className="relative aspect-video bg-black">
+                <img
+                    src={`/api/cameras/${camera.id}/mjpeg`}
+                    alt={camera.name}
+                    className="w-full h-full object-cover"
+                    onError={() => notify('Sin señal — verificá la conexión')}
+                />
+
+                {/* Recording badge */}
+                {camera.isRecording && (
+                    <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-red-600/90 backdrop-blur-sm rounded px-2 py-1">
+                        <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                        <span className="text-white text-xs font-bold tracking-wide">REC</span>
+                    </div>
+                )}
+
+                {/* Bottom overlay */}
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/75 to-transparent px-3 py-2.5">
+                    <div className="flex items-end justify-between">
+                        <div>
+                            <p className="text-white font-medium text-sm leading-tight">{camera.name}</p>
+                            <p className="text-slate-300 text-xs">{camera.ip}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 bg-green-400 rounded-full" />
+                            <span className="text-slate-300 text-xs">EN VIVO</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* Video Stream */}
-            <div className="mb-4">
-                <video
-                    ref={videoRef}
-                    className="w-full h-64 bg-black rounded object-cover"
-                    controls
-                    autoPlay
-                    muted
-                    src={streamUrl}
-                    onError={(e) => {
-                        console.error('Error cargando stream:', e);
-                        setLastAction('Error al cargar el stream. Probando conexión MJPEG...');
-                        // Fallback a MJPEG
-                        e.target.src = `http://${camera.ip}/mjpeg/1`;
-                    }}
-                    onLoadStart={() => setLastAction('Conectando...')}
-                    onCanPlay={() => setLastAction('Stream conectado')}
-                >
-                    Tu navegador no soporta video HTML5.
-                </video>
-
-                {/* Fallback: Imagen MJPEG */}
-                <div className="mt-2 text-center">
-                    <p className="text-sm text-gray-600 mb-2">
-                        Si el video no carga, prueba el stream MJPEG:
-                    </p>
-                    <img
-                        src={`http://${camera.ip}/mjpeg/1`}
-                        alt="MJPEG Stream"
-                        className="max-w-full h-32 mx-auto border rounded"
-                        onError={(e) => {
-                            e.target.style.display = 'none';
-                            setLastAction('Stream no disponible');
-                        }}
-                    />
-                </div>
-            </div>
-
-            {/* Controles principales */}
-            <div className="flex gap-2 mb-4">
+            {/* Action bar */}
+            <div className="px-3 py-2.5 flex items-center gap-2 border-t border-slate-700">
                 <button
                     onClick={handleScreenshot}
                     disabled={isLoading}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm transition-colors disabled:opacity-40"
                 >
-                    <Camera size={16} />
+                    <Camera size={14} />
                     Captura
                 </button>
 
                 <button
                     onClick={handleRecording}
                     disabled={isLoading}
-                    className={`flex items-center gap-2 px-4 py-2 rounded text-white ${camera.isRecording
-                        ? 'bg-red-500 hover:bg-red-600'
-                        : 'bg-green-500 hover:bg-green-600'
-                        } disabled:opacity-50`}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${
+                        camera.isRecording
+                            ? 'bg-red-600 hover:bg-red-500 text-white'
+                            : 'bg-blue-600 hover:bg-blue-500 text-white'
+                    }`}
                 >
-                    {camera.isRecording ? <Square size={16} /> : <Video size={16} />}
+                    {camera.isRecording ? <Square size={14} /> : <Video size={14} />}
                     {camera.isRecording ? 'Detener' : 'Grabar'}
                 </button>
 
+                <div className="flex-1" />
+
                 <button
-                    onClick={() => handlePTZ('stop')}
-                    className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600"
+                    onClick={() => setShowPTZ(!showPTZ)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-400 rounded-lg text-sm transition-colors"
                 >
-                    <RotateCcw size={16} />
-                    Stop
+                    <Move size={14} />
+                    PTZ
+                    {showPTZ ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                 </button>
             </div>
 
-            {/* Controles PTZ */}
-            <div className="grid grid-cols-3 gap-2 max-w-xs mx-auto mb-4">
-                <div></div>
-                <button
-                    onClick={() => handlePTZ('up')}
-                    className="py-2 px-4 bg-gray-200 hover:bg-gray-300 rounded"
-                >
-                    ⬆️
-                </button>
-                <div></div>
-
-                <button
-                    onClick={() => handlePTZ('left')}
-                    className="py-2 px-4 bg-gray-200 hover:bg-gray-300 rounded"
-                >
-                    ⬅️
-                </button>
-                <button
-                    onClick={() => handlePTZ('stop')}
-                    className="py-2 px-4 bg-gray-300 hover:bg-gray-400 rounded font-bold"
-                >
-                    ⏹️
-                </button>
-                <button
-                    onClick={() => handlePTZ('right')}
-                    className="py-2 px-4 bg-gray-200 hover:bg-gray-300 rounded"
-                >
-                    ➡️
-                </button>
-
-                <div></div>
-                <button
-                    onClick={() => handlePTZ('down')}
-                    className="py-2 px-4 bg-gray-200 hover:bg-gray-300 rounded"
-                >
-                    ⬇️
-                </button>
-                <div></div>
-            </div>
-
-            {/* Controles de Zoom */}
-            <div className="flex gap-2 justify-center mb-4">
-                <button
-                    onClick={() => handlePTZ('zoomin')}
-                    className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600"
-                >
-                    🔍+ Zoom In
-                </button>
-                <button
-                    onClick={() => handlePTZ('zoomout')}
-                    className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600"
-                >
-                    🔍- Zoom Out
-                </button>
-            </div>
-
-            {/* Presets */}
-            <div className="grid grid-cols-4 gap-2">
-                {[1, 2, 3, 4].map(preset => (
-                    <button
-                        key={preset}
-                        onClick={() => handlePTZ('preset', preset)}
-                        className="py-2 px-3 bg-indigo-500 text-white rounded hover:bg-indigo-600 text-sm"
-                    >
-                        Preset {preset}
-                    </button>
-                ))}
-            </div>
-
-            {/* Información de conexión */}
-            <div className="mt-4 p-2 bg-gray-50 rounded text-xs">
-                <div>RTSP: {camera.rtspUrl}</div>
-                <div>HTTP Stream: {streamUrl}</div>
-            </div>
-
-            {/* Status */}
+            {/* Status bar */}
             {lastAction && (
-                <div className="mt-4 p-2 bg-gray-100 rounded text-sm text-center">
-                    {lastAction}
+                <div className="px-3 py-1.5 bg-slate-900 border-t border-slate-700">
+                    <p className="text-slate-400 text-xs">{lastAction}</p>
+                </div>
+            )}
+
+            {/* PTZ Panel (collapsible) */}
+            {showPTZ && (
+                <div className="border-t border-slate-700 p-3 bg-slate-900">
+                    <div className="grid grid-cols-3 gap-1.5 max-w-[180px] mx-auto mb-3">
+                        <div />
+                        <button onClick={() => handlePTZ('up')} className="py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm text-slate-200 transition-colors">▲</button>
+                        <div />
+                        <button onClick={() => handlePTZ('left')} className="py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm text-slate-200 transition-colors">◀</button>
+                        <button onClick={() => handlePTZ('stop')} className="py-2 bg-slate-600 hover:bg-slate-500 rounded text-sm text-slate-200 transition-colors">■</button>
+                        <button onClick={() => handlePTZ('right')} className="py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm text-slate-200 transition-colors">▶</button>
+                        <div />
+                        <button onClick={() => handlePTZ('down')} className="py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm text-slate-200 transition-colors">▼</button>
+                        <div />
+                    </div>
+                    <div className="flex gap-1.5 justify-center mb-3">
+                        <button onClick={() => handlePTZ('zoomin')} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-xs transition-colors">Zoom +</button>
+                        <button onClick={() => handlePTZ('zoomout')} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-xs transition-colors">Zoom −</button>
+                    </div>
+                    <div className="flex gap-1.5 justify-center">
+                        {[1, 2, 3, 4].map(p => (
+                            <button key={p} onClick={() => handlePTZ('preset', p)} className="px-2.5 py-1 bg-indigo-800 hover:bg-indigo-700 text-indigo-200 rounded text-xs transition-colors">P{p}</button>
+                        ))}
+                    </div>
                 </div>
             )}
         </div>
-    )
+    );
 }

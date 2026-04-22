@@ -1,0 +1,14 @@
+[
+  {
+    "id": "cam3",
+    "name": "Cámara Cocina",
+    "ip": "192.168.68.103",
+    "port": "554",
+    "username": "admin",
+    "password": "admin123",
+    "httpPort": "80",
+    "rtspUrl": "rtsp://admin:admin123@192.168.68.103:554/live",
+    "httpUrl": "http://192.168.68.103:80",
+    "lastScreenshot": null
+  }
+]

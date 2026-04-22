@@ -24,29 +24,22 @@ export default function handler(req, res) {
 
         // Convertir RTSP a HTTP stream usando FFmpeg
         const ffmpeg = spawn('ffmpeg', [
+            '-rtsp_transport', 'tcp',
             '-i', camera.rtspUrl,
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
             '-tune', 'zerolatency',
-            '-profile:v', 'baseline',
-            '-level', '3.0',
             '-pix_fmt', 'yuv420p',
-            '-r', '15',              // 15 fps para mejor fluidez
-            '-s', '854x480',         // Resolución más baja
-            '-b:v', '500k',          // Bitrate más bajo
-            '-maxrate', '500k',
-            '-bufsize', '1000k',
-            '-g', '30',              // Keyframe cada 2 segundos
+            '-r', '15',
+            '-g', '15', // keyframe cada 1s
             '-c:a', 'aac',
             '-ar', '22050',
-            '-ac', '2',
+            '-ac', '1',
             '-b:a', '64k',
-            '-f', 'mp4',
-            '-movflags', 'frag_keyframe+empty_moov+default_base_moof+frag_every_frame',
-            '-frag_duration', '500000',  // Fragmentos más pequeños
-            '-min_frag_duration', '500000',
+            '-f', 'mpegts',
             '-'
         ]);
+
 
         // Pipe el output de FFmpeg a la respuesta HTTP
         ffmpeg.stdout.pipe(res);

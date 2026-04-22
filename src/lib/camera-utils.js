@@ -2,10 +2,29 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+const CAMERAS_FILE = path.join(process.cwd(), 'cameras.json');
+
 export class CameraManager {
     constructor() {
         this.activeRecordings = new Map();
-        this.cameras = new Map();
+        this.cameras = this._load();
+    }
+
+    _load() {
+        try {
+            if (fs.existsSync(CAMERAS_FILE)) {
+                const data = JSON.parse(fs.readFileSync(CAMERAS_FILE, 'utf-8'));
+                const map = new Map();
+                for (const cam of data) map.set(cam.id, { ...cam, isRecording: false });
+                return map;
+            }
+        } catch (_) {}
+        return new Map();
+    }
+
+    _save() {
+        const data = Array.from(this.cameras.values()).map(({ isRecording, ...rest }) => rest);
+        fs.writeFileSync(CAMERAS_FILE, JSON.stringify(data, null, 2));
     }
 
     // Registrar una cámara
@@ -17,11 +36,13 @@ export class CameraManager {
             port: config.port || 554,
             username: config.username,
             password: config.password,
-            rtspUrl: `rtsp://${config.username}:${config.password}@${config.ip}:${config.port}/live`,
+            httpPort: config.httpPort || 80,
+            rtspUrl: `rtsp://${config.username}:${config.password}@${config.ip}:${config.port || 554}${config.rtspPath || '/live'}`,
             httpUrl: `http://${config.ip}:${config.httpPort || 80}`,
             isRecording: false,
             lastScreenshot: null
         });
+        this._save();
     }
 
     // Obtener todas las cámaras
@@ -39,50 +60,53 @@ export class CameraManager {
         const camera = this.cameras.get(cameraId);
         if (!camera) throw new Error('Cámara no encontrada');
 
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `camera_${cameraId}_${timestamp}_%03d.mp4`;
-        const outputPath = path.join(process.cwd(), 'public', 'recordings', filename);
+        const recordingsDir = path.join(process.cwd(), 'public', 'recordings');
+        if (!fs.existsSync(recordingsDir)) fs.mkdirSync(recordingsDir, { recursive: true });
 
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `cam_${cameraId}_${timestamp}.mp4`;
+        const outputPath = path.join(recordingsDir, filename);
+
+        // -c:v copy: zero re-encoding CPU (passes H.264 bitstream through directly)
+        // -c:a aac:  audio transcoding is trivial CPU — this is what adds audio
         const ffmpeg = spawn('ffmpeg', [
+            '-fflags', 'nobuffer',
+            '-rtsp_transport', 'tcp',
             '-i', camera.rtspUrl,
-            '-c', 'copy',
-            '-f', 'segment',
-            '-segment_time', '300', // 5 minutos por segmento
-            '-segment_format', 'mp4',
-            '-reset_timestamps', '1',
-            outputPath
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            '-ar', '44100',
+            '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+            '-f', 'mp4',
+            '-y',
+            outputPath,
         ]);
 
-        this.activeRecordings.set(cameraId, ffmpeg);
-        camera.isRecording = true;
-
-        ffmpeg.on('error', (error) => {
-            console.error(`Error en grabación cámara ${cameraId}:`, error);
-        });
-
-        ffmpeg.on('close', (code) => {
-            console.log(`Grabación cámara ${cameraId} finalizada con código: ${code}`);
+        ffmpeg.stderr.on('data', () => {});
+        ffmpeg.on('error', () => {
             this.activeRecordings.delete(cameraId);
             camera.isRecording = false;
         });
+        ffmpeg.on('close', () => {
+            this.activeRecordings.delete(cameraId);
+            camera.isRecording = false;
+        });
+
+        this.activeRecordings.set(cameraId, { process: ffmpeg, filename });
+        camera.isRecording = true;
 
         return { status: 'started', filename };
     }
 
     // Detener grabación
     stopRecording(cameraId) {
-        const process = this.activeRecordings.get(cameraId);
+        const recording = this.activeRecordings.get(cameraId);
         const camera = this.cameras.get(cameraId);
-
-        if (process) {
-            process.kill('SIGTERM');
+        if (recording?.process) {
+            recording.process.kill('SIGTERM');
             this.activeRecordings.delete(cameraId);
         }
-
-        if (camera) {
-            camera.isRecording = false;
-        }
-
+        if (camera) camera.isRecording = false;
         return { status: 'stopped' };
     }
 

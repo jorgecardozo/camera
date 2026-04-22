@@ -1,26 +1,26 @@
 import { useState, useEffect } from 'react';
-import { Video, Camera, Download, Calendar, HardDrive } from 'lucide-react';
+import { Video, Camera, Download, X, RefreshCw } from 'lucide-react';
 
 export default function FilesViewer() {
     const [recordings, setRecordings] = useState([]);
     const [screenshots, setScreenshots] = useState([]);
     const [activeTab, setActiveTab] = useState('recordings');
     const [loading, setLoading] = useState(false);
+    const [lightbox, setLightbox] = useState(null);
 
     const fetchFiles = async () => {
         setLoading(true);
         try {
-            // Obtener grabaciones
-            const recordingsResponse = await fetch('/api/files?type=recordings');
-            const recordingsData = await recordingsResponse.json();
-            setRecordings(recordingsData.recordings || []);
-
-            // Obtener screenshots
-            const screenshotsResponse = await fetch('/api/files?type=screenshots');
-            const screenshotsData = await screenshotsResponse.json();
-            setScreenshots(screenshotsData.screenshots || []);
-        } catch (error) {
-            console.error('Error al cargar archivos:', error);
+            const [recRes, ssRes] = await Promise.all([
+                fetch('/api/files?type=recordings'),
+                fetch('/api/files?type=screenshots'),
+            ]);
+            const recData = await recRes.json();
+            const ssData = await ssRes.json();
+            setRecordings(recData.recordings || []);
+            setScreenshots(ssData.screenshots || []);
+        } catch (e) {
+            console.error(e);
         } finally {
             setLoading(false);
         }
@@ -28,193 +28,167 @@ export default function FilesViewer() {
 
     useEffect(() => {
         fetchFiles();
-        // Actualizar cada 30 segundos
-        const interval = setInterval(fetchFiles, 30000);
-        return () => clearInterval(interval);
+        const i = setInterval(fetchFiles, 30000);
+        return () => clearInterval(i);
     }, []);
 
-    const formatFileSize = (bytes) => {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    const fmt = {
+        size: (b) => {
+            if (!b) return '0 B';
+            const k = 1024, s = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(b) / Math.log(k));
+            return `${(b / Math.pow(k, i)).toFixed(1)} ${s[i]}`;
+        },
+        date: (d) => new Date(d).toLocaleString('es-AR', {
+            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+        }),
     };
 
-    const formatDate = (date) => {
-        return new Date(date).toLocaleString('es-ES', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    };
+    const totalSize = (arr) => arr.reduce((s, f) => s + (f.size || 0), 0);
 
-    const FileCard = ({ file, type }) => (
-        <div className="border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                    {type === 'recording' ? (
-                        <Video className="w-8 h-8 text-blue-500" />
-                    ) : (
-                        <Camera className="w-8 h-8 text-green-500" />
-                    )}
-                    <div>
-                        <h3 className="font-medium text-gray-900 truncate max-w-xs">
-                            {file.filename}
-                        </h3>
-                        <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
-                            <span className="flex items-center gap-1">
-                                <Calendar className="w-4 h-4" />
-                                {formatDate(file.created)}
-                            </span>
-                            <span className="flex items-center gap-1">
-                                <HardDrive className="w-4 h-4" />
-                                {formatFileSize(file.size)}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-                <a
-                    href={file.path}
-                    download
-                    className="flex items-center gap-1 px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+    return (
+        <div className="space-y-4">
+            {/* Lightbox */}
+            {lightbox && (
+                <div
+                    className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+                    onClick={() => setLightbox(null)}
                 >
-                    <Download className="w-4 h-4" />
-                    Descargar
-                </a>
-            </div>
-
-            {type === 'recording' ? (
-                <div className="mt-3">
-                    <video
-                        className="w-full h-32 bg-black rounded object-cover"
-                        controls
-                        preload="metadata"
-                    >
-                        <source src={file.path} type="video/mp4" />
-                        Tu navegador no soporta video HTML5.
-                    </video>
-                </div>
-            ) : (
-                <div className="mt-3">
+                    <button className="absolute top-4 right-4 text-white/60 hover:text-white">
+                        <X className="w-8 h-8" />
+                    </button>
                     <img
-                        src={file.path}
-                        alt="Screenshot"
-                        className="w-full h-32 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
-                        onClick={() => window.open(file.path, '_blank')}
+                        src={lightbox}
+                        alt="Captura"
+                        className="max-w-full max-h-full rounded-lg"
+                        onClick={e => e.stopPropagation()}
                     />
                 </div>
             )}
-        </div>
-    );
 
-    return (
-        <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-2xl font-bold mb-6">Archivos de Vigilancia</h2>
-
-            {/* Tabs */}
-            <div className="flex space-x-1 mb-6">
-                <button
-                    onClick={() => setActiveTab('recordings')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'recordings'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div className="flex gap-1 bg-slate-800 rounded-lg p-1">
+                    <button
+                        onClick={() => setActiveTab('recordings')}
+                        className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                            activeTab === 'recordings'
+                                ? 'bg-blue-600 text-white'
+                                : 'text-slate-400 hover:text-slate-200'
                         }`}
-                >
-                    <Video className="w-4 h-4 inline mr-2" />
-                    Grabaciones ({recordings.length})
-                </button>
-                <button
-                    onClick={() => setActiveTab('screenshots')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'screenshots'
-                        ? 'bg-green-500 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    >
+                        <Video className="w-4 h-4" />
+                        Grabaciones ({recordings.length})
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('screenshots')}
+                        className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                            activeTab === 'screenshots'
+                                ? 'bg-blue-600 text-white'
+                                : 'text-slate-400 hover:text-slate-200'
                         }`}
-                >
-                    <Camera className="w-4 h-4 inline mr-2" />
-                    Capturas ({screenshots.length})
-                </button>
-            </div>
-
-            {/* Botón de actualizar */}
-            <div className="flex justify-between items-center mb-4">
-                <div className="text-sm text-gray-600">
-                    {activeTab === 'recordings'
-                        ? `${recordings.length} grabaciones encontradas`
-                        : `${screenshots.length} capturas encontradas`
-                    }
+                    >
+                        <Camera className="w-4 h-4" />
+                        Capturas ({screenshots.length})
+                    </button>
                 </div>
+
                 <button
                     onClick={fetchFiles}
                     disabled={loading}
-                    className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-sm transition-colors disabled:opacity-40"
                 >
-                    {loading ? 'Actualizando...' : 'Actualizar'}
+                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                    Actualizar
                 </button>
             </div>
 
-            {/* Contenido */}
-            {loading ? (
-                <div className="text-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-                    <p className="mt-2 text-gray-600">Cargando archivos...</p>
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {activeTab === 'recordings' ? (
-                        recordings.length > 0 ? (
-                            recordings.map((file, index) => (
-                                <FileCard key={index} file={file} type="recording" />
-                            ))
-                        ) : (
-                            <div className="col-span-full text-center py-8 text-gray-500">
-                                <Video className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                                No hay grabaciones disponibles
-                            </div>
-                        )
-                    ) : (
-                        screenshots.length > 0 ? (
-                            screenshots.map((file, index) => (
-                                <FileCard key={index} file={file} type="screenshot" />
-                            ))
-                        ) : (
-                            <div className="col-span-full text-center py-8 text-gray-500">
-                                <Camera className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                                No hay capturas disponibles
-                            </div>
-                        )
-                    )}
-                </div>
-            )}
-
-            {/* Estadísticas */}
-            <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-                <h3 className="font-medium mb-2">Estadísticas de Almacenamiento</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                        <div className="text-gray-600">Total Grabaciones</div>
-                        <div className="font-semibold">{recordings.length}</div>
-                    </div>
-                    <div>
-                        <div className="text-gray-600">Total Capturas</div>
-                        <div className="font-semibold">{screenshots.length}</div>
-                    </div>
-                    <div>
-                        <div className="text-gray-600">Tamaño Grabaciones</div>
-                        <div className="font-semibold">
-                            {formatFileSize(recordings.reduce((total, file) => total + file.size, 0))}
-                        </div>
-                    </div>
-                    <div>
-                        <div className="text-gray-600">Tamaño Capturas</div>
-                        <div className="font-semibold">
-                            {formatFileSize(screenshots.reduce((total, file) => total + file.size, 0))}
-                        </div>
-                    </div>
-                </div>
+            {/* Stats bar */}
+            <div className="bg-slate-800 rounded-lg px-4 py-2.5 flex gap-6 text-sm">
+                <span className="text-slate-400">Grabaciones: <span className="text-slate-200">{recordings.length}</span></span>
+                <span className="text-slate-400">Capturas: <span className="text-slate-200">{screenshots.length}</span></span>
+                <span className="text-slate-400">Tamaño video: <span className="text-slate-200">{fmt.size(totalSize(recordings))}</span></span>
+                <span className="text-slate-400">Tamaño capturas: <span className="text-slate-200">{fmt.size(totalSize(screenshots))}</span></span>
             </div>
+
+            {/* Content */}
+            {loading && (recordings.length === 0 && screenshots.length === 0) ? (
+                <div className="flex items-center justify-center py-16">
+                    <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+            ) : activeTab === 'recordings' ? (
+                recordings.length === 0 ? (
+                    <EmptyState icon={Video} text="No hay grabaciones" />
+                ) : (
+                    <div className="space-y-3">
+                        {recordings.map((file, i) => (
+                            <div key={i} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+                                <video
+                                    className="w-full max-h-72 bg-black"
+                                    controls
+                                    preload="metadata"
+                                    src={file.path}
+                                />
+                                <div className="px-4 py-3 flex items-center justify-between">
+                                    <div>
+                                        <p className="text-slate-200 text-sm font-medium truncate max-w-xs">{file.filename}</p>
+                                        <p className="text-slate-500 text-xs mt-0.5">{fmt.date(file.created)} · {fmt.size(file.size)}</p>
+                                    </div>
+                                    <a
+                                        href={file.path}
+                                        download
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm transition-colors"
+                                    >
+                                        <Download className="w-4 h-4" />
+                                        Descargar
+                                    </a>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )
+            ) : (
+                screenshots.length === 0 ? (
+                    <EmptyState icon={Camera} text="No hay capturas" />
+                ) : (
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {screenshots.map((file, i) => (
+                            <div key={i} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden group">
+                                <div
+                                    className="aspect-video bg-black cursor-pointer relative"
+                                    onClick={() => setLightbox(file.path)}
+                                >
+                                    <img
+                                        src={file.path}
+                                        alt="Captura"
+                                        className="w-full h-full object-cover group-hover:opacity-90 transition-opacity"
+                                    />
+                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
+                                        <span className="text-white text-xs bg-black/60 px-2 py-1 rounded">Ver</span>
+                                    </div>
+                                </div>
+                                <div className="px-2.5 py-2 flex items-center justify-between">
+                                    <p className="text-slate-500 text-xs">{fmt.date(file.created)}</p>
+                                    <a href={file.path} download className="text-slate-500 hover:text-slate-300 transition-colors">
+                                        <Download className="w-3.5 h-3.5" />
+                                    </a>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )
+            )}
+        </div>
+    );
+}
+
+function EmptyState({ icon: Icon, text }) {
+    return (
+        <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <div className="w-14 h-14 bg-slate-800 rounded-full flex items-center justify-center">
+                <Icon className="w-7 h-7 text-slate-600" />
+            </div>
+            <p className="text-slate-500 text-sm">{text}</p>
         </div>
     );
 }
