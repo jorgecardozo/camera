@@ -1,5 +1,5 @@
 import { cameraManager } from '../../lib/camera-utils';
-import { getRetentionStatus } from '../../lib/retention';
+import { getRetentionStatus, getDiskStatus } from '../../lib/retention';
 
 export default function handler(req, res) {
     if (req.method === 'GET') {
@@ -14,6 +14,10 @@ export default function handler(req, res) {
                 res.status(200).json({ screenshots });
             } else if (type === 'retention-status') {
                 res.status(200).json(getRetentionStatus());
+            } else if (type === 'disk-status') {
+                const status = getDiskStatus();
+                if (!status) return res.status(503).json({ error: 'No se pudo leer el disco' });
+                res.status(200).json(status);
             } else {
                 res.status(400).json({ error: 'Tipo no válido. Use: recordings, screenshots o retention-status' });
             }

@@ -63,6 +63,32 @@ export function getRetentionStatus() {
     };
 }
 
+export function getDiskStatus() {
+    try {
+        const stats = fs.statfsSync(RECORDINGS_DIR.startsWith('/') && fs.existsSync(RECORDINGS_DIR)
+            ? RECORDINGS_DIR
+            : process.cwd());
+        const GB = 1_073_741_824;
+        const availableBytes = stats.bavail * stats.bsize;
+        const totalBytes     = stats.blocks * stats.bsize;
+        const usedBytes      = (stats.blocks - stats.bfree) * stats.bsize;
+
+        const recFiles   = getRecordingFiles();
+        const recBytes   = recFiles.reduce((s, f) => s + f.size, 0);
+
+        return {
+            availableGB:   +(availableBytes / GB).toFixed(1),
+            totalGB:       +(totalBytes / GB).toFixed(1),
+            usedGB:        +(usedBytes / GB).toFixed(1),
+            recordingsGB:  +(recBytes / GB).toFixed(2),
+            maxGB:         MAX_SIZE_GB,
+            maxAgeHours:   MAX_AGE_HOURS,
+        };
+    } catch (_) {
+        return null;
+    }
+}
+
 // Run on module load and then every hour.
 cleanOldRecordings();
 setInterval(cleanOldRecordings, 3_600_000);

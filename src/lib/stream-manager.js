@@ -17,19 +17,22 @@ function findMarker(buf, b0, b1, from = 0) {
 
 class StreamManager {
     constructor() {
-        this.streams = new Map();
-        // Defer until after module graph is settled so cameraManager is ready.
+        this.streams   = new Map(); // MJPEG viewer streams  (one per camera)
+        this.recorders = new Map(); // Direct RTSP recorders (one per camera)
         setImmediate(() => this._initContinuous());
     }
+
+    // ─── Auto-start on boot ─────────────────────────────────────────────────
 
     _initContinuous() {
         for (const camera of cameraManager.getAllCameras()) {
             if (camera.continuousRecord || camera.isRecording) {
-                this._getOrCreate(camera.id, camera);
                 this.startRecorder(camera.id, camera);
             }
         }
     }
+
+    // ─── Viewer (MJPEG) ─────────────────────────────────────────────────────
 
     _spawn(state) {
         const ffmpeg = spawn('ffmpeg', [
@@ -52,12 +55,10 @@ class StreamManager {
 
         ffmpeg.stdout.on('data', (chunk) => {
             buf = Buffer.concat([buf, chunk]);
-
             let search = 0;
             while (true) {
                 const start = findMarker(buf, 0xFF, 0xD8, search);
                 if (start === -1) break;
-
                 const end = findMarker(buf, 0xFF, 0xD9, start + 2);
                 if (end === -1) break;
 
@@ -76,13 +77,7 @@ class StreamManager {
                         state.clients.delete(res);
                     }
                 }
-
-                // Pipe frame to recorder — starts at a clean JPEG boundary
-                if (state.recorder && !state.recorder.stdin.destroyed) {
-                    try { state.recorder.stdin.write(frame); } catch (_) {}
-                }
             }
-
             buf = search > 0 ? buf.slice(search) : buf;
             if (buf.length > 4 * 1024 * 1024) buf = Buffer.alloc(0);
         });
@@ -92,7 +87,7 @@ class StreamManager {
         ffmpeg.on('close', () => {
             state.process = null;
             buf = Buffer.alloc(0);
-            if (state.clients.size > 0 || state.recorder) {
+            if (state.clients.size > 0) {
                 setTimeout(() => this._spawn(state), 2000);
             } else {
                 this.streams.delete(state.cameraId);
@@ -102,15 +97,7 @@ class StreamManager {
 
     _getOrCreate(cameraId, camera) {
         if (this.streams.has(cameraId)) return this.streams.get(cameraId);
-        const state = {
-            cameraId,
-            camera,
-            process: null,
-            clients: new Set(),
-            recorder: null,
-            currentFilename: null,
-            segmentTimer: null,
-        };
+        const state = { cameraId, camera, process: null, clients: new Set() };
         this.streams.set(cameraId, state);
         this._spawn(state);
         return state;
@@ -121,9 +108,9 @@ class StreamManager {
         state.clients.add(res);
         res.on('close', () => {
             state.clients.delete(res);
-            if (state.clients.size === 0 && !state.recorder) {
+            if (state.clients.size === 0) {
                 setTimeout(() => {
-                    if (state.clients.size === 0 && !state.recorder) {
+                    if (state.clients.size === 0) {
                         state.process?.kill('SIGTERM');
                         this.streams.delete(cameraId);
                     }
@@ -132,100 +119,85 @@ class StreamManager {
         });
     }
 
-    startRecorder(cameraId, camera) {
-        const state = this._getOrCreate(cameraId, camera);
+    // ─── Recorder (direct RTSP, c:v copy) ───────────────────────────────────
 
-        if (state.recorder && !state.recorder.stdin.destroyed) {
-            return { status: 'already_recording', filename: state.currentFilename };
+    startRecorder(cameraId, camera) {
+        if (this.recorders.has(cameraId)) {
+            return { status: 'already_recording', filename: this.recorders.get(cameraId).filename };
         }
 
         const recordingsDir = path.join(process.cwd(), 'public', 'recordings');
         fs.mkdirSync(recordingsDir, { recursive: true });
 
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `cam_${cameraId}_${timestamp}.mp4`;
+        const filename  = `cam_${cameraId}_${timestamp}.mp4`;
         const outputPath = path.join(recordingsDir, filename);
 
-        // Re-encode MJPEG frames → H.264 MP4 for broad browser compatibility.
-        const recorder = spawn('ffmpeg', [
-            '-f', 'image2pipe',
-            '-vcodec', 'mjpeg',
-            '-framerate', '25',
-            '-i', 'pipe:0',
-            '-c:v', 'libx264',
-            '-preset', 'ultrafast',
-            '-crf', '28',
-            '-pix_fmt', 'yuv420p',
-            '-vsync', 'vfr',
+        // Direct RTSP copy — zero CPU, original quality, includes audio.
+        const rec = spawn('ffmpeg', [
+            '-fflags', 'nobuffer',
+            '-rtsp_transport', 'tcp',
+            '-i', camera.rtspUrl,
+            '-map', '0:v',
+            '-c:v', 'copy',
+            '-map', '0:a?',     // include audio if the camera has it
+            '-c:a', 'aac',
+            '-ar', '44100',
+            '-ac', '1',
+            '-b:a', '64k',
             '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
             '-f', 'mp4',
             '-y',
             outputPath,
         ]);
 
-        recorder.stderr.on('data', () => {});
+        rec.stderr.on('data', () => {});
 
-        recorder.on('close', () => {
-            if (state.recorder === recorder) state.recorder = null;
-            if (state.segmentTimer) {
-                clearTimeout(state.segmentTimer);
-                state.segmentTimer = null;
+        let segmentTimer = null;
+
+        rec.on('close', () => {
+            if (segmentTimer) { clearTimeout(segmentTimer); segmentTimer = null; }
+            if (this.recorders.get(cameraId)?.process === rec) {
+                this.recorders.delete(cameraId);
             }
             const cam = cameraManager.getCamera(cameraId);
-            if (cam) {
-                cam.isRecording = false;
-                cameraManager._save();
-            }
-            if (state.camera.continuousRecord) {
-                setTimeout(() => this.startRecorder(cameraId, state.camera), 500);
+            if (cam) { cam.isRecording = false; cameraManager._save(); }
+
+            // Restart segment for continuous mode.
+            if (camera.continuousRecord) {
+                setTimeout(() => this.startRecorder(cameraId, camera), 500);
             }
         });
 
-        state.recorder = recorder;
-        state.currentFilename = filename;
-
         // Periodic segmentation for continuous recordings.
-        if (state.camera.continuousRecord && SEGMENT_MS > 0) {
-            state.segmentTimer = setTimeout(() => {
-                if (state.recorder === recorder && !recorder.stdin.destroyed) {
-                    recorder.stdin.end();
-                }
+        if (camera.continuousRecord && SEGMENT_MS > 0) {
+            segmentTimer = setTimeout(() => {
+                rec.kill('SIGTERM');
             }, SEGMENT_MS);
         }
 
+        this.recorders.set(cameraId, { process: rec, filename, segmentTimer });
+
         const cam = cameraManager.getCamera(cameraId);
-        if (cam) {
-            cam.isRecording = true;
-            cameraManager._save();
-        }
+        if (cam) { cam.isRecording = true; cameraManager._save(); }
 
         return { status: 'started', filename };
     }
 
     stopRecorder(cameraId) {
-        const state = this.streams.get(cameraId);
-        if (!state?.recorder || state.recorder.stdin.destroyed) {
-            return { status: 'not_recording' };
-        }
+        const entry = this.recorders.get(cameraId);
+        if (!entry) return { status: 'not_recording' };
 
-        if (state.camera.continuousRecord) {
+        const cam = cameraManager.getCamera(cameraId);
+        if (cam?.continuousRecord) {
             return { status: 'continuous', error: 'Desactivá grabación continua primero desde Configuración' };
         }
 
-        if (state.segmentTimer) {
-            clearTimeout(state.segmentTimer);
-            state.segmentTimer = null;
-        }
+        if (entry.segmentTimer) clearTimeout(entry.segmentTimer);
+        entry.process.kill('SIGTERM');
+        this.recorders.delete(cameraId);
 
-        try { state.recorder.stdin.end(); } catch (_) {}
-        state.recorder = null;
-
-        const cam = cameraManager.getCamera(cameraId);
-        if (cam) {
-            cam.isRecording = false;
-            cameraManager._save();
-        }
-
+        if (cam) { cam.isRecording = false; cameraManager._save(); }
         return { status: 'stopped' };
     }
 }
