@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { Camera, Video, Square, ChevronDown, ChevronUp, Move, Trash2 } from 'lucide-react';
+import { Camera, Video, Square, Trash2 } from 'lucide-react';
 
 export default function CameraStream({ camera, onUpdate }) {
     const [isLoading, setIsLoading] = useState(false);
     const [lastAction, setLastAction] = useState('');
-    const [showPTZ, setShowPTZ] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
 
     const notify = (msg, duration = 3000) => {
@@ -57,23 +56,6 @@ export default function CameraStream({ camera, onUpdate }) {
             setConfirmDelete(false);
         } finally {
             setIsLoading(false);
-        }
-    };
-
-    const handlePTZ = async (action, preset = null) => {
-        try {
-            const body = preset !== null ? { action, preset } : { action };
-            const res = await fetch(`/api/cameras/${camera.id}/ptz`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            if (!res.ok) {
-                const err = await res.json();
-                notify(`PTZ error: ${err.error}`);
-            }
-        } catch (e) {
-            notify(`PTZ error: ${e.message}`);
         }
     };
 
@@ -148,15 +130,6 @@ export default function CameraStream({ camera, onUpdate }) {
 
                 <div className="flex-1" />
 
-                <button
-                    onClick={() => setShowPTZ(!showPTZ)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-400 rounded-lg text-sm transition-colors"
-                >
-                    <Move size={14} />
-                    PTZ
-                    {showPTZ ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                </button>
-
                 {confirmDelete ? (
                     <div className="flex items-center gap-1">
                         <button
@@ -191,31 +164,6 @@ export default function CameraStream({ camera, onUpdate }) {
                 </div>
             )}
 
-            {/* PTZ Panel (collapsible) */}
-            {showPTZ && (
-                <div className="border-t border-slate-700 p-3 bg-slate-900">
-                    <div className="grid grid-cols-3 gap-1.5 max-w-[180px] mx-auto mb-3">
-                        <div />
-                        <button onClick={() => handlePTZ('up')} className="py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm text-slate-200 transition-colors">▲</button>
-                        <div />
-                        <button onClick={() => handlePTZ('left')} className="py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm text-slate-200 transition-colors">◀</button>
-                        <button onClick={() => handlePTZ('stop')} className="py-2 bg-slate-600 hover:bg-slate-500 rounded text-sm text-slate-200 transition-colors">■</button>
-                        <button onClick={() => handlePTZ('right')} className="py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm text-slate-200 transition-colors">▶</button>
-                        <div />
-                        <button onClick={() => handlePTZ('down')} className="py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm text-slate-200 transition-colors">▼</button>
-                        <div />
-                    </div>
-                    <div className="flex gap-1.5 justify-center mb-3">
-                        <button onClick={() => handlePTZ('zoomin')} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-xs transition-colors">Zoom +</button>
-                        <button onClick={() => handlePTZ('zoomout')} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-xs transition-colors">Zoom −</button>
-                    </div>
-                    <div className="flex gap-1.5 justify-center">
-                        {[1, 2, 3, 4].map(p => (
-                            <button key={p} onClick={() => handlePTZ('preset', p)} className="px-2.5 py-1 bg-indigo-800 hover:bg-indigo-700 text-indigo-200 rounded text-xs transition-colors">P{p}</button>
-                        ))}
-                    </div>
-                </div>
-            )}
         </div>
     );
 }
