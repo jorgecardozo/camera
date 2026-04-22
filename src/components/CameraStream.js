@@ -75,9 +75,13 @@ export default function CameraStream({ camera, onUpdate }) {
 
                 {/* Recording badge */}
                 {camera.isRecording && (
-                    <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-red-600/90 backdrop-blur-sm rounded px-2 py-1">
+                    <div className={`absolute top-3 right-3 flex items-center gap-1.5 backdrop-blur-sm rounded px-2 py-1 ${
+                        camera.continuousRecord ? 'bg-amber-600/90' : 'bg-red-600/90'
+                    }`}>
                         <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
-                        <span className="text-white text-xs font-bold tracking-wide">REC</span>
+                        <span className="text-white text-xs font-bold tracking-wide">
+                            {camera.continuousRecord ? 'AUTO' : 'REC'}
+                        </span>
                     </div>
                 )}
 
@@ -107,18 +111,25 @@ export default function CameraStream({ camera, onUpdate }) {
                     Captura
                 </button>
 
-                <button
-                    onClick={handleRecording}
-                    disabled={isLoading}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${
-                        camera.isRecording
-                            ? 'bg-red-600 hover:bg-red-500 text-white'
-                            : 'bg-blue-600 hover:bg-blue-500 text-white'
-                    }`}
-                >
-                    {camera.isRecording ? <Square size={14} /> : <Video size={14} />}
-                    {camera.isRecording ? 'Detener' : 'Grabar'}
-                </button>
+                {camera.continuousRecord ? (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-700/40 border border-amber-600/40 text-amber-300 rounded-lg text-sm font-medium cursor-default">
+                        <Video size={14} />
+                        Auto
+                    </div>
+                ) : (
+                    <button
+                        onClick={handleRecording}
+                        disabled={isLoading}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${
+                            camera.isRecording
+                                ? 'bg-red-600 hover:bg-red-500 text-white'
+                                : 'bg-blue-600 hover:bg-blue-500 text-white'
+                        }`}
+                    >
+                        {camera.isRecording ? <Square size={14} /> : <Video size={14} />}
+                        {camera.isRecording ? 'Detener' : 'Grabar'}
+                    </button>
+                )}
 
                 <div className="flex-1" />
 

@@ -1,4 +1,9 @@
 import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { cameraManager } from './camera-utils';
+
+const SEGMENT_MS = parseInt(process.env.RECORDING_SEGMENT_MINUTES || '30', 10) * 60_000;
 
 // JPEG SOI (FF D8) and EOI (FF D9) markers.
 // In entropy-coded JPEG data, FF is always followed by 00 (byte stuffing),
@@ -13,6 +18,17 @@ function findMarker(buf, b0, b1, from = 0) {
 class StreamManager {
     constructor() {
         this.streams = new Map();
+        // Defer until after module graph is settled so cameraManager is ready.
+        setImmediate(() => this._initContinuous());
+    }
+
+    _initContinuous() {
+        for (const camera of cameraManager.getAllCameras()) {
+            if (camera.continuousRecord || camera.isRecording) {
+                this._getOrCreate(camera.id, camera);
+                this.startRecorder(camera.id, camera);
+            }
+        }
     }
 
     _spawn(state) {
@@ -23,7 +39,7 @@ class StreamManager {
             '-analyzeduration', '0',
             '-rtsp_transport', 'tcp',
             '-i', state.camera.rtspUrl,
-            '-f', 'image2pipe',   // raw JPEG frames, no multipart wrapper
+            '-f', 'image2pipe',
             '-vcodec', 'mjpeg',
             '-q:v', '3',
             '-r', '25',
@@ -43,16 +59,14 @@ class StreamManager {
                 if (start === -1) break;
 
                 const end = findMarker(buf, 0xFF, 0xD9, start + 2);
-                if (end === -1) break; // incomplete frame — wait for more data
+                if (end === -1) break;
 
-                const frame = buf.slice(start, end + 2); // complete JPEG frame
+                const frame = buf.slice(start, end + 2);
                 search = end + 2;
 
-                // Build multipart chunk for HTTP clients
                 const header = Buffer.from(
                     `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`
                 );
-
                 for (const res of state.clients) {
                     try {
                         res.write(header);
@@ -63,16 +77,13 @@ class StreamManager {
                     }
                 }
 
-                // Feed complete JPEG frame to recorder — always starts at a clean boundary
+                // Pipe frame to recorder — starts at a clean JPEG boundary
                 if (state.recorder && !state.recorder.stdin.destroyed) {
                     try { state.recorder.stdin.write(frame); } catch (_) {}
                 }
             }
 
-            // Keep only unprocessed data
             buf = search > 0 ? buf.slice(search) : buf;
-
-            // Safety valve: drop buffer if it grows beyond 4 MB (stalled stream)
             if (buf.length > 4 * 1024 * 1024) buf = Buffer.alloc(0);
         });
 
@@ -91,7 +102,15 @@ class StreamManager {
 
     _getOrCreate(cameraId, camera) {
         if (this.streams.has(cameraId)) return this.streams.get(cameraId);
-        const state = { cameraId, camera, process: null, clients: new Set(), recorder: null };
+        const state = {
+            cameraId,
+            camera,
+            process: null,
+            clients: new Set(),
+            recorder: null,
+            currentFilename: null,
+            segmentTimer: null,
+        };
         this.streams.set(cameraId, state);
         this._spawn(state);
         return state;
@@ -113,6 +132,102 @@ class StreamManager {
         });
     }
 
+    startRecorder(cameraId, camera) {
+        const state = this._getOrCreate(cameraId, camera);
+
+        if (state.recorder && !state.recorder.stdin.destroyed) {
+            return { status: 'already_recording', filename: state.currentFilename };
+        }
+
+        const recordingsDir = path.join(process.cwd(), 'public', 'recordings');
+        fs.mkdirSync(recordingsDir, { recursive: true });
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `cam_${cameraId}_${timestamp}.mp4`;
+        const outputPath = path.join(recordingsDir, filename);
+
+        // Re-encode MJPEG frames → H.264 MP4 for broad browser compatibility.
+        const recorder = spawn('ffmpeg', [
+            '-f', 'image2pipe',
+            '-vcodec', 'mjpeg',
+            '-framerate', '25',
+            '-i', 'pipe:0',
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-crf', '28',
+            '-pix_fmt', 'yuv420p',
+            '-vsync', 'vfr',
+            '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+            '-f', 'mp4',
+            '-y',
+            outputPath,
+        ]);
+
+        recorder.stderr.on('data', () => {});
+
+        recorder.on('close', () => {
+            if (state.recorder === recorder) state.recorder = null;
+            if (state.segmentTimer) {
+                clearTimeout(state.segmentTimer);
+                state.segmentTimer = null;
+            }
+            const cam = cameraManager.getCamera(cameraId);
+            if (cam) {
+                cam.isRecording = false;
+                cameraManager._save();
+            }
+            if (state.camera.continuousRecord) {
+                setTimeout(() => this.startRecorder(cameraId, state.camera), 500);
+            }
+        });
+
+        state.recorder = recorder;
+        state.currentFilename = filename;
+
+        // Periodic segmentation for continuous recordings.
+        if (state.camera.continuousRecord && SEGMENT_MS > 0) {
+            state.segmentTimer = setTimeout(() => {
+                if (state.recorder === recorder && !recorder.stdin.destroyed) {
+                    recorder.stdin.end();
+                }
+            }, SEGMENT_MS);
+        }
+
+        const cam = cameraManager.getCamera(cameraId);
+        if (cam) {
+            cam.isRecording = true;
+            cameraManager._save();
+        }
+
+        return { status: 'started', filename };
+    }
+
+    stopRecorder(cameraId) {
+        const state = this.streams.get(cameraId);
+        if (!state?.recorder || state.recorder.stdin.destroyed) {
+            return { status: 'not_recording' };
+        }
+
+        if (state.camera.continuousRecord) {
+            return { status: 'continuous', error: 'Desactivá grabación continua primero desde Configuración' };
+        }
+
+        if (state.segmentTimer) {
+            clearTimeout(state.segmentTimer);
+            state.segmentTimer = null;
+        }
+
+        try { state.recorder.stdin.end(); } catch (_) {}
+        state.recorder = null;
+
+        const cam = cameraManager.getCamera(cameraId);
+        if (cam) {
+            cam.isRecording = false;
+            cameraManager._save();
+        }
+
+        return { status: 'stopped' };
+    }
 }
 
 export const streamManager = new StreamManager();

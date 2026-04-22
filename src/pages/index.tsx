@@ -10,6 +10,7 @@ type Camera = {
   name: string;
   ip: string;
   isRecording?: boolean;
+  continuousRecord?: boolean;
 };
 
 export default function Home() {
