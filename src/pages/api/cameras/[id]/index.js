@@ -8,9 +8,7 @@ export default function handler(req, res) {
         const camera = cameraManager.getCamera(id);
         if (!camera) return res.status(404).json({ error: 'Cámara no encontrada' });
 
-        // Stop any active streams / recordings before removing
-        streamManager.stop(id);
-        streamManager.stopRecorder(id);
+        streamManager.forceStopAll(id);
         cameraManager.removeCamera(id);
 
         res.status(200).json({ message: 'Cámara eliminada' });

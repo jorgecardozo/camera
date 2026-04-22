@@ -200,6 +200,23 @@ class StreamManager {
         if (cam) { cam.isRecording = false; cameraManager._save(); }
         return { status: 'stopped' };
     }
+
+    // Force-stop viewer + recorder regardless of continuousRecord (used on delete).
+    forceStopAll(cameraId) {
+        const viewer = this.streams.get(cameraId);
+        if (viewer) {
+            viewer.clients.clear();
+            viewer.process?.kill('SIGTERM');
+            this.streams.delete(cameraId);
+        }
+
+        const rec = this.recorders.get(cameraId);
+        if (rec) {
+            if (rec.segmentTimer) clearTimeout(rec.segmentTimer);
+            rec.process.kill('SIGTERM');
+            this.recorders.delete(cameraId);
+        }
+    }
 }
 
 export const streamManager = new StreamManager();
