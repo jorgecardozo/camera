@@ -122,40 +122,14 @@ export default function CameraSetup({ onCameraAdded, cameras = [] }) {
         try {
             const res    = await fetch('/api/cameras/scan');
             const result = await res.json();
-            if (!res.ok) { setScanError('Error al escanear la red'); return; }
-
-            setScanResults(result.found);
-            if (result.found.length === 0) {
-                const subnets = result.subnets?.join(', ') || result.subnet;
-                setScanError(`No se encontraron dispositivos en ${subnets}.x`);
-                return;
-            }
-
-            // Auto-register new RTSP cameras (skip already-registered IPs)
-            const newRtsp = result.found.filter(r => r.rtspPort && !registeredIps.has(r.ip));
-            if (newRtsp.length > 0) {
-                const results = await Promise.all(newRtsp.map(r =>
-                    fetch('/api/cameras', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            id:       idFromIp(r.ip),
-                            name:     `Cámara ${r.ip.split('.').pop()}`,
-                            ip:       r.ip,
-                            port:     r.rtspPort || 554,
-                            httpPort: r.httpPort || 80,
-                            username: '',
-                            password: '',
-                            rtspPath: '/live',
-                            continuousRecord: false,
-                        }),
-                    }).then(res => ({ ip: r.ip, ok: res.ok }))
-                ));
-                const added = results.filter(r => r.ok).map(r => r.ip);
-                if (added.length > 0) {
-                    setAddedIps(new Set(added));
-                    onCameraAdded?.();
+            if (res.ok) {
+                setScanResults(result.found);
+                if (result.found.length === 0) {
+                    const subnets = result.subnets?.join(', ') || result.subnet;
+                    setScanError(`No se encontraron dispositivos en ${subnets}.x`);
                 }
+            } else {
+                setScanError('Error al escanear la red');
             }
         } catch (err) {
             setScanError(`Error: ${err.message}`);
