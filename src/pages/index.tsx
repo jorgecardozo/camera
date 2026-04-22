@@ -121,7 +121,7 @@ export default function Home() {
           )}
 
           {activeTab === 'setup' && (
-            <CameraSetup onCameraAdded={() => { fetchCameras(); setActiveTab('cameras'); }} />
+            <CameraSetup cameras={cameras} onCameraAdded={() => { fetchCameras(); setActiveTab('cameras'); }} />
           )}
 
           {activeTab === 'files' && <FilesViewer />}

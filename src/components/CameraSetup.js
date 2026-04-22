@@ -7,7 +7,8 @@ function idFromIp(ip) {
     return `cam${last}`;
 }
 
-export default function CameraSetup({ onCameraAdded }) {
+export default function CameraSetup({ onCameraAdded, cameras = [] }) {
+    const registeredIps = new Set(cameras.map(c => c.ip));
     const [showForm, setShowForm]     = useState(false);
     const [formData, setFormData]     = useState({
         id: '', name: '', ip: '', port: '554', httpPort: '80',
@@ -202,14 +203,16 @@ export default function CameraSetup({ onCameraAdded }) {
                                 Cámaras detectadas (RTSP)
                             </p>
                             {rtspResults.map((result) => {
-                                const added    = addedIps.has(result.ip);
-                                const expanded = expandedIp === result.ip;
+                                const added      = addedIps.has(result.ip);
+                                const registered = registeredIps.has(result.ip);
+                                const done       = added || registered;
+                                const expanded   = expandedIp === result.ip;
 
                                 return (
                                     <div
                                         key={result.ip}
                                         className={`border rounded-xl overflow-hidden transition-colors ${
-                                            added
+                                            done
                                                 ? 'bg-green-900/20 border-green-700/50'
                                                 : 'bg-slate-900 border-slate-600'
                                         }`}
@@ -224,8 +227,13 @@ export default function CameraSetup({ onCameraAdded }) {
                                                 </div>
                                             </div>
 
-                                            {added ? (
-                                                <span className="text-green-400 text-sm font-medium">Agregada</span>
+                                            {done ? (
+                                                <span className="flex items-center gap-1.5 text-green-400 text-sm font-medium">
+                                                    <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+                                                    {registered && !added
+                                                        ? cameras.find(c => c.ip === result.ip)?.name || 'Conectada'
+                                                        : 'Agregada'}
+                                                </span>
                                             ) : expanded ? (
                                                 <button
                                                     onClick={() => setExpandedIp(null)}
@@ -322,25 +330,39 @@ export default function CameraSetup({ onCameraAdded }) {
                             <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">
                                 Otros dispositivos (sin RTSP)
                             </p>
-                            {nonRtspResults.map((result) => (
-                                <div
-                                    key={result.ip}
-                                    className="flex items-center justify-between p-3 bg-slate-900 border border-slate-700 rounded-lg"
-                                >
-                                    <div>
-                                        <span className="font-mono text-slate-400">{result.ip}</span>
-                                        <div className="text-xs text-slate-600 mt-0.5">
-                                            {result.httpPort && <span>HTTP :{result.httpPort}</span>}
-                                        </div>
-                                    </div>
-                                    <button
-                                        onClick={() => applyScannedIp(result)}
-                                        className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-xs transition-colors"
+                            {nonRtspResults.map((result) => {
+                                const registered = registeredIps.has(result.ip);
+                                return (
+                                    <div
+                                        key={result.ip}
+                                        className={`flex items-center justify-between p-3 border rounded-lg ${
+                                            registered
+                                                ? 'bg-green-900/20 border-green-700/50'
+                                                : 'bg-slate-900 border-slate-700'
+                                        }`}
                                     >
-                                        Usar IP
-                                    </button>
-                                </div>
-                            ))}
+                                        <div>
+                                            <span className={`font-mono ${registered ? 'text-slate-200' : 'text-slate-400'}`}>{result.ip}</span>
+                                            <div className="text-xs text-slate-600 mt-0.5">
+                                                {result.httpPort && <span>HTTP :{result.httpPort}</span>}
+                                            </div>
+                                        </div>
+                                        {registered ? (
+                                            <span className="flex items-center gap-1.5 text-green-400 text-xs font-medium">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                                                {cameras.find(c => c.ip === result.ip)?.name || 'Conectada'}
+                                            </span>
+                                        ) : (
+                                            <button
+                                                onClick={() => applyScannedIp(result)}
+                                                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-xs transition-colors"
+                                            >
+                                                Usar IP
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>
