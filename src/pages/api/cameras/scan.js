@@ -36,7 +36,7 @@ function getNetworkRanges() {
     return ranges.length > 0 ? ranges : ['192.168.1'];
 }
 
-function checkPort(host, port, timeout = 600) {
+function checkPort(host, port, timeout = 1500) {
     return new Promise((resolve) => {
         const s = new net.Socket();
         let done = false;
@@ -58,13 +58,15 @@ async function scanSubnet(subnet) {
         const batch = ips.slice(i, i + BATCH);
         const results = await Promise.all(
             batch.map(async (ip) => {
-                const [rtsp, http80, http8080] = await Promise.all([
+                const [rtsp, rtsp8554, http80, http8080] = await Promise.all([
                     checkPort(ip, 554),
+                    checkPort(ip, 8554),
                     checkPort(ip, 80),
                     checkPort(ip, 8080),
                 ]);
-                if (rtsp || http80 || http8080) {
-                    return { ip, rtspPort: rtsp ? 554 : null, httpPort: http80 ? 80 : (http8080 ? 8080 : null) };
+                const rtspPort = rtsp ? 554 : (rtsp8554 ? 8554 : null);
+                if (rtspPort || http80 || http8080) {
+                    return { ip, rtspPort, httpPort: http80 ? 80 : (http8080 ? 8080 : null) };
                 }
                 return null;
             })
