@@ -174,40 +174,4 @@ export class CameraManager {
     }
 }
 
-export class PTZController {
-    constructor(cameraIP, username, password, httpPort = 80) {
-        this.baseUrl = `http://${cameraIP}:${httpPort}`;
-        this.auth = Buffer.from(`${username}:${password}`).toString('base64');
-    }
-
-    async sendCommand(command) {
-        const url = `${this.baseUrl}/cgi-bin/ptz.cgi?action=${command}`;
-        try {
-            const response = await fetch(url, {
-                headers: { 'Authorization': `Basic ${this.auth}` },
-            });
-            return await response.text();
-        } catch (error) {
-            console.error('Error PTZ:', error);
-            throw error;
-        }
-    }
-
-    async moveLeft() { return this.sendCommand('moveleft'); }
-    async moveRight() { return this.sendCommand('moveright'); }
-    async moveUp() { return this.sendCommand('moveup'); }
-    async moveDown() { return this.sendCommand('movedown'); }
-    async zoomIn() { return this.sendCommand('zoomin'); }
-    async zoomOut() { return this.sendCommand('zoomout'); }
-    async stop() { return this.sendCommand('stop'); }
-
-    async goToPreset(presetNumber) {
-        return this.sendCommand(`preset&channel=0&code=${presetNumber}&act=goto`);
-    }
-
-    async setPreset(presetNumber) {
-        return this.sendCommand(`preset&channel=0&code=${presetNumber}&act=set`);
-    }
-}
-
 export const cameraManager = new CameraManager();
