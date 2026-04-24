@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Video, Camera, Download, X, RefreshCw, HardDrive, Activity } from 'lucide-react';
+import { Video, Camera, Download, X, RefreshCw, HardDrive, Activity, Search } from 'lucide-react';
 
 function extractCameraId(filename) {
     let m = filename.match(/^cam_([^_]+)_/);
@@ -7,6 +7,16 @@ function extractCameraId(filename) {
     m = filename.match(/^screenshot_camera_([^_]+)_/);
     if (m) return m[1];
     return null;
+}
+
+// Extract the timestamp embedded in the filename (already in local-friendly form)
+// e.g. cam_cam106_2026-04-24T02-09-26-153Z.mp4 → Date object
+function extractFileTimestamp(filename) {
+    const m = filename.match(/(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)/);
+    if (!m) return null;
+    // Convert dashes back to colons/dots: 2026-04-24T02-09-26-153Z → 2026-04-24T02:09:26.153Z
+    const iso = m[1].replace(/T(\d{2})-(\d{2})-(\d{2})-(\d{3}Z)$/, 'T$1:$2:$3.$4');
+    return new Date(iso);
 }
 
 /** @param {{ cameras: { id: string, name: string }[] }} props */
@@ -19,6 +29,10 @@ export default function FilesViewer({ cameras = [] }) {
     const [activeCam, setActiveCam]     = useState('all');
     const [loading, setLoading]         = useState(false);
     const [lightbox, setLightbox]       = useState(null);
+    const [dateFilter, setDateFilter]   = useState('');
+    const [timeFrom, setTimeFrom]       = useState('');
+    const [timeTo, setTimeTo]           = useState('');
+    const [nameFilter, setNameFilter]   = useState('');
 
     const fetchFiles = async () => {
         setLoading(true);
@@ -58,6 +72,12 @@ export default function FilesViewer({ cameras = [] }) {
         date: (d) => new Date(d).toLocaleString('es-AR', {
             day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
         }),
+        // Use filename timestamp (local time) for recordings
+        recDate: (filename) => {
+            const d = extractFileTimestamp(filename);
+            if (!d) return '—';
+            return d.toLocaleString('es-AR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+        },
     };
 
     const camName = (id) => cameras.find(c => c.id === id)?.name ?? id;
@@ -69,12 +89,45 @@ export default function FilesViewer({ cameras = [] }) {
         ...events.map(e => e.cameraId),
     ])].filter(Boolean).sort();
 
-    const filteredRec = activeCam === 'all'
-        ? recordings
-        : recordings.filter(f => extractCameraId(f.filename) === activeCam);
-    const filteredSS = activeCam === 'all'
-        ? screenshots
-        : screenshots.filter(f => extractCameraId(f.filename) === activeCam);
+    const applyDateFilter = (files) => {
+        if (!dateFilter && !timeFrom && !timeTo && !nameFilter) return files;
+        const needle = nameFilter.toLowerCase();
+        return files.filter(f => {
+            // Use timestamp from filename (UTC) converted to local time for filtering
+            const d = extractFileTimestamp(f.filename) || new Date(f.created);
+            if (dateFilter) {
+                // toLocaleDateString('en-CA') gives YYYY-MM-DD in local timezone
+                if (d.toLocaleDateString('en-CA') !== dateFilter) return false;
+            }
+            if (timeFrom) {
+                const [h, m] = timeFrom.split(':').map(Number);
+                const from = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m, 0);
+                if (d < from) return false;
+            }
+            if (timeTo) {
+                const [h, m] = timeTo.split(':').map(Number);
+                const to = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m, 59);
+                if (d > to) return false;
+            }
+            if (needle) {
+                const camId = extractCameraId(f.filename) || '';
+                const camN  = cameras.find(c => c.id === camId)?.name || '';
+                const searchable = `${f.filename} ${camId} ${camN}`.toLowerCase();
+                if (!searchable.includes(needle)) return false;
+            }
+            return true;
+        });
+    };
+
+    const filteredRec = applyDateFilter(
+        activeCam === 'all' ? recordings : recordings.filter(f => extractCameraId(f.filename) === activeCam)
+    );
+    const filteredSS = applyDateFilter(
+        activeCam === 'all' ? screenshots : screenshots.filter(f => extractCameraId(f.filename) === activeCam)
+    );
+
+    const hasDateFilter = dateFilter || timeFrom || timeTo || nameFilter;
+    const clearDateFilter = () => { setDateFilter(''); setTimeFrom(''); setTimeTo(''); setNameFilter(''); };
 
     return (
         <div className="space-y-4">
@@ -138,6 +191,54 @@ export default function FilesViewer({ cameras = [] }) {
                 </button>
             </div>
 
+            {/* Date/time filter — only for recordings and screenshots */}
+            {activeTab !== 'events' && (
+                <div className="flex flex-wrap items-center gap-2 p-3 bg-slate-800/60 border border-slate-700/60 rounded-xl">
+                    <Search className="w-4 h-4 text-slate-500 shrink-0" />
+                    <input
+                        type="text"
+                        placeholder="Buscar por nombre o cámara..."
+                        value={nameFilter}
+                        onChange={e => setNameFilter(e.target.value)}
+                        className="bg-slate-900 border border-slate-600/80 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 placeholder:text-slate-600 min-w-0 flex-1 sm:flex-none sm:w-56"
+                    />
+                    <input
+                        type="date"
+                        value={dateFilter}
+                        onChange={e => setDateFilter(e.target.value)}
+                        className="bg-slate-900 border border-slate-600/80 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 [color-scheme:dark]"
+                    />
+                    <span className="text-slate-500 text-sm">de</span>
+                    <input
+                        type="time"
+                        value={timeFrom}
+                        onChange={e => setTimeFrom(e.target.value)}
+                        className="bg-slate-900 border border-slate-600/80 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 [color-scheme:dark]"
+                    />
+                    <span className="text-slate-500 text-sm">a</span>
+                    <input
+                        type="time"
+                        value={timeTo}
+                        onChange={e => setTimeTo(e.target.value)}
+                        className="bg-slate-900 border border-slate-600/80 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 [color-scheme:dark]"
+                    />
+                    {hasDateFilter && (
+                        <button
+                            onClick={clearDateFilter}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-xs transition-colors"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                            Limpiar
+                        </button>
+                    )}
+                    {hasDateFilter && (
+                        <span className="text-slate-500 text-xs ml-auto">
+                            {activeTab === 'recordings' ? filteredRec.length : filteredSS.length} resultado{(activeTab === 'recordings' ? filteredRec.length : filteredSS.length) !== 1 ? 's' : ''}
+                        </span>
+                    )}
+                </div>
+            )}
+
             {/* Content */}
             {loading && !recordings.length && !screenshots.length && !events.length ? (
                 <div className="flex items-center justify-center py-16">
@@ -146,7 +247,7 @@ export default function FilesViewer({ cameras = [] }) {
             ) : activeTab === 'recordings' ? (
                 filteredRec.length === 0
                     ? <EmptyState icon={Video} text="No hay grabaciones" />
-                    : <RecordingList files={filteredRec} fmt={fmt} camName={camName} showCam={activeCam === 'all'} />
+                    : <RecordingList files={filteredRec} fmt={fmt} camName={camName} showCam={activeCam === 'all'} extractFileTimestamp={extractFileTimestamp} />
             ) : activeTab === 'screenshots' ? (
                 filteredSS.length === 0
                     ? <EmptyState icon={Camera} text="No hay capturas" />
@@ -194,7 +295,7 @@ function TabBtn({ active, onClick, icon: Icon, count, children }) {
     );
 }
 
-function RecordingList({ files, fmt, camName, showCam }) {
+function RecordingList({ files, fmt, camName, showCam, extractFileTimestamp }) {
     return (
         <div className="space-y-3">
             {files.map((file, i) => {
@@ -215,7 +316,7 @@ function RecordingList({ files, fmt, camName, showCam }) {
                                     </span>
                                 )}
                                 <div className="text-slate-400 text-xs">
-                                    {fmt.date(file.created)} · {fmt.size(file.size)}
+                                    {fmt.recDate(file.filename)} · {fmt.size(file.size)}
                                 </div>
                             </div>
                             <a
