@@ -3,10 +3,20 @@ import Head from 'next/head';
 import CameraStream from '../components/CameraStream';
 import CameraSetup from '../components/CameraSetup';
 import FilesViewer from '../components/FilesViewer';
-import { Shield, Video, Camera, Settings, Files } from 'lucide-react';
+import { Shield, Video, Settings, Files } from 'lucide-react';
+
+type Camera = {
+  id: string;
+  name: string;
+  ip: string;
+  isRecording?: boolean;
+  continuousRecord?: boolean;
+  motionDetect?: boolean;
+  motionActive?: boolean;
+};
 
 export default function Home() {
-  const [cameras, setCameras] = useState([]);
+  const [cameras, setCameras] = useState<Camera[]>([]);
   const [activeTab, setActiveTab] = useState('cameras');
   const [loading, setLoading] = useState(true);
 
@@ -16,7 +26,7 @@ export default function Home() {
       const data = await response.json();
       setCameras(data.cameras || []);
     } catch (error) {
-      console.error('Error al cargar cámaras:', error);
+      console.error('Error:', error);
     } finally {
       setLoading(false);
     }
@@ -24,174 +34,140 @@ export default function Home() {
 
   useEffect(() => {
     fetchCameras();
-    // Actualizar cada 10 segundos
-    const interval = setInterval(fetchCameras, 10000);
+    const interval = setInterval(fetchCameras, 3000);
     return () => clearInterval(interval);
   }, []);
 
-  const handleCameraAdded = () => {
-    fetchCameras();
-    setActiveTab('cameras');
-  };
+  useEffect(() => {
+    if (!loading && cameras.length === 0) setActiveTab('setup');
+  }, [loading]);
+
+  const tabs = [
+    { id: 'cameras', label: 'Cámaras', icon: Video },
+    { id: 'setup',   label: 'Config',  icon: Settings },
+    { id: 'files',   label: 'Archivos', icon: Files },
+  ];
+
+  const onlineCount = cameras.filter(c => (c as any).isOnline !== false).length;
 
   return (
     <>
       <Head>
-        <title>Sistema de Vigilancia - 4 Cámaras</title>
-        <meta name="description" content="Sistema de vigilancia con 4 cámaras IP" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
+        <title>Vigilancia</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <meta name="theme-color" content="#020617" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </Head>
 
-      <div className="min-h-screen bg-gray-100">
+      <div className="min-h-screen bg-slate-950">
         {/* Header */}
-        <header className="bg-white shadow-sm border-b">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center py-4">
-              <div className="flex items-center space-x-3">
-                <Shield className="w-8 h-8 text-blue-600" />
-                <h1 className="text-2xl font-bold text-gray-900">
-                  Sistema de Vigilancia
-                </h1>
-              </div>
-              <div className="flex items-center space-x-4">
-                <div className="text-sm text-gray-600">
-                  {cameras.length} cámaras configuradas
-                </div>
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm text-gray-600">En línea</span>
-                </div>
-              </div>
+        <header className="bg-slate-900/95 backdrop-blur border-b border-slate-800 sticky top-0 z-40"
+          style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+          <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <Shield className="w-5 h-5 text-blue-400" />
+              <span className="text-white font-semibold tracking-tight">Vigilancia</span>
             </div>
-          </div>
-        </header>
-
-        {/* Navigation */}
-        <nav className="bg-white shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex space-x-8">
-              <button
-                onClick={() => setActiveTab('cameras')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'cameras'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-              >
-                <Video className="w-4 h-4 inline mr-2" />
-                Vista de Cámaras
-              </button>
-              <button
-                onClick={() => setActiveTab('setup')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'setup'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-              >
-                <Settings className="w-4 h-4 inline mr-2" />
-                Configuración
-              </button>
-              <button
-                onClick={() => setActiveTab('files')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'files'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-              >
-                <Files className="w-4 h-4 inline mr-2" />
-                Archivos
-              </button>
-            </div>
-          </div>
-        </nav>
-
-        {/* Main Content */}
-        <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-          {activeTab === 'cameras' && (
-            <div>
-              {loading ? (
-                <div className="text-center py-12">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-                  <p className="mt-4 text-gray-600">Cargando cámaras...</p>
-                </div>
-              ) : cameras.length > 0 ? (
-                <>
-                  <div className="mb-6">
-                    <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                      Vista en Tiempo Real
-                    </h2>
-                    <p className="text-gray-600">
-                      Controla tus {cameras.length} cámaras, graba video y toma capturas
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {cameras.map((camera: any) => (
-                      <CameraStream
-                        key={camera.id}
-                        camera={camera}
-                        onUpdate={fetchCameras}
-                      />
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="text-center py-12">
-                  <Camera className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">
-                    No hay cámaras configuradas
-                  </h3>
-                  <p className="text-gray-600 mb-6">
-                    Agrega tus primeras cámaras para comenzar la vigilancia
-                  </p>
-                  <button
-                    onClick={() => setActiveTab('setup')}
-                    className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-                  >
-                    Configurar Cámaras
-                  </button>
+            <div className="flex items-center gap-3">
+              {cameras.length > 0 && (
+                <span className="text-slate-500 text-xs hidden sm:block">{cameras.length} cámaras</span>
+              )}
+              {onlineCount > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                  <span className="text-green-400 text-xs font-medium">{onlineCount} en línea</span>
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Top nav — visible only on sm+ */}
+          <nav className="hidden sm:block border-t border-slate-800/60">
+            <div className="max-w-7xl mx-auto px-4 flex gap-1">
+              {tabs.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setActiveTab(id)}
+                  className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === id
+                      ? 'border-blue-500 text-blue-400'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </nav>
+        </header>
+
+        {/* Content */}
+        <main className="max-w-7xl mx-auto px-4 py-4 pb-24 sm:pb-6">
+          {activeTab === 'cameras' && (
+            loading ? (
+              <div className="flex flex-col items-center justify-center py-24 gap-4">
+                <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-slate-400 text-sm">Conectando cámaras...</p>
+              </div>
+            ) : cameras.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {cameras.map((camera) => (
+                  <CameraStream key={camera.id} camera={camera} onUpdate={fetchCameras} />
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-24 gap-4">
+                <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center">
+                  <Video className="w-8 h-8 text-slate-600" />
+                </div>
+                <div className="text-center">
+                  <h3 className="text-slate-200 font-medium mb-1">Sin cámaras configuradas</h3>
+                  <p className="text-slate-500 text-sm">Agregá tus cámaras desde Configuración</p>
+                </div>
+                <button
+                  onClick={() => setActiveTab('setup')}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-medium transition-colors"
+                >
+                  Ir a Configuración
+                </button>
+              </div>
+            )
           )}
 
-          {activeTab === 'setup' && (
-            <div>
-              <div className="mb-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                  Configuración de Cámaras
-                </h2>
-                <p className="text-gray-600">
-                  Agrega y configura tus cámaras IP para el sistema de vigilancia
-                </p>
-              </div>
-              <CameraSetup onCameraAdded={handleCameraAdded} />
-            </div>
-          )}
+          <div className={activeTab === 'setup' ? '' : 'hidden'}>
+            <CameraSetup
+              cameras={cameras}
+              autoScan={cameras.length === 0}
+              onCameraAdded={() => { fetchCameras(); setActiveTab('cameras'); }}
+            />
+          </div>
 
-          {activeTab === 'files' && (
-            <div>
-              <div className="mb-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                  Archivo de Grabaciones
-                </h2>
-                <p className="text-gray-600">
-                  Revisa, descarga y gestiona todas tus grabaciones y capturas
-                </p>
-              </div>
-              <FilesViewer />
-            </div>
-          )}
+          {activeTab === 'files' && <FilesViewer cameras={cameras} />}
         </main>
 
-        {/* Footer */}
-        <footer className="bg-white border-t mt-12">
-          <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
-            <div className="text-center text-sm text-gray-500">
-              Sistema de Vigilancia © 2025 - Desarrollado con Next.js
-            </div>
+        {/* Bottom tab bar — mobile only */}
+        <nav
+          className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur border-t border-slate-800"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        >
+          <div className="flex">
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`flex-1 flex flex-col items-center gap-1 py-3 text-xs font-medium transition-colors ${
+                  activeTab === id ? 'text-blue-400' : 'text-slate-500'
+                }`}
+              >
+                <Icon className={`w-5 h-5 ${activeTab === id ? 'text-blue-400' : 'text-slate-500'}`} />
+                {label}
+              </button>
+            ))}
           </div>
-        </footer>
+        </nav>
       </div>
     </>
-  )
+  );
 }

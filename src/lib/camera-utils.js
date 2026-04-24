@@ -1,14 +1,59 @@
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import './retention'; // register startup cleanup + hourly interval
+
+const CAMERAS_FILE = path.join(process.cwd(), 'cameras.json');
+
+function buildRtspUrl(config) {
+    const host = `${config.ip}:${config.port || 554}`;
+    const path_ = config.rtspPath || '/live';
+    const user  = config.username || '';
+    const pass  = config.password || '';
+    if (user || pass) return `rtsp://${user}:${pass}@${host}${path_}`;
+    return `rtsp://${host}${path_}`;
+}
 
 export class CameraManager {
     constructor() {
-        this.activeRecordings = new Map();
-        this.cameras = new Map();
+        this.cameras = this._load();
     }
 
-    // Registrar una cámara
+    _load() {
+        try {
+            if (fs.existsSync(CAMERAS_FILE)) {
+                const data = JSON.parse(fs.readFileSync(CAMERAS_FILE, 'utf-8'));
+                const map = new Map();
+                for (const cam of data) {
+                    map.set(cam.id, {
+                        ...cam,
+                        isRecording: false,          // reset on startup — recorder must be re-started explicitly
+                        continuousRecord: cam.continuousRecord ?? false,
+                        motionDetect: cam.motionDetect ?? false,
+                        motionSensitivity: cam.motionSensitivity ?? 0.05,
+                        telegramBotToken: cam.telegramBotToken || '',
+                        telegramChatId: cam.telegramChatId || '',
+                        telegramEnabled: cam.telegramEnabled ?? false,
+                        notifyObjects: cam.notifyObjects || null,
+                        // Runtime-only fields — always reset on startup
+                        motionActive: false,
+                        motionBoxes: [],
+                        isOnline: false,
+                    });
+                }
+                return map;
+            }
+        } catch (_) {}
+        return new Map();
+    }
+
+    _save() {
+        const data = Array.from(this.cameras.values()).map(({ motionActive, motionBoxes, isOnline, ...cam }) => cam);
+        const tmp = CAMERAS_FILE + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+        fs.renameSync(tmp, CAMERAS_FILE);
+    }
+
     registerCamera(id, config) {
         this.cameras.set(id, {
             id,
@@ -17,105 +62,63 @@ export class CameraManager {
             port: config.port || 554,
             username: config.username,
             password: config.password,
-            rtspUrl: `rtsp://${config.username}:${config.password}@${config.ip}:${config.port}/live`,
+            httpPort: config.httpPort || 80,
+            rtspUrl: buildRtspUrl(config),
             httpUrl: `http://${config.ip}:${config.httpPort || 80}`,
             isRecording: false,
-            lastScreenshot: null
+            continuousRecord: !!config.continuousRecord,
+            motionDetect: !!config.motionDetect,
+            motionSensitivity: config.motionSensitivity ?? 0.05,
+            telegramBotToken: config.telegramBotToken || '',
+            telegramChatId: config.telegramChatId || '',
+            telegramEnabled: config.telegramEnabled ?? false,
+            notifyObjects: config.notifyObjects || null,
+            lastScreenshot: null,
         });
+        this._save();
     }
 
-    // Obtener todas las cámaras
+    updateCamera(id, fields) {
+        const cam = this.cameras.get(id);
+        if (!cam) return false;
+        Object.assign(cam, fields);
+        this._save();
+        return true;
+    }
+
+    removeCamera(id) {
+        this.cameras.delete(id);
+        this._save();
+    }
+
     getAllCameras() {
         return Array.from(this.cameras.values());
     }
 
-    // Obtener una cámara específica
     getCamera(id) {
         return this.cameras.get(id);
     }
 
-    // Iniciar grabación
-    // Iniciar grabación con mejor compatibilidad
-    startRecording(cameraId) {
-        const camera = this.cameras.get(cameraId);
-        if (!camera) throw new Error('Cámara no encontrada');
-
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `camera_${cameraId}_${timestamp}_%03d.mp4`;
-        const outputPath = path.join(process.cwd(), 'public', 'recordings', filename);
-
-        const ffmpeg = spawn('ffmpeg', [
-            '-i', camera.rtspUrl,
-            '-c:v', 'libx264',
-            '-preset', 'fast',
-            '-crf', '23',
-            '-profile:v', 'high',
-            '-level', '4.0',
-            '-pix_fmt', 'yuv420p',
-            '-c:a', 'aac',
-            '-ar', '44100',
-            '-ac', '2',
-            '-movflags', '+faststart',
-            '-f', 'segment',
-            '-segment_time', '300', // 5 minutos por segmento
-            '-segment_format', 'mp4',
-            '-reset_timestamps', '1',
-            '-avoid_negative_ts', 'make_zero',
-            outputPath
-        ]);
-
-        this.activeRecordings.set(cameraId, ffmpeg);
-        camera.isRecording = true;
-
-        ffmpeg.stderr.on('data', (data) => {
-            console.log(`FFmpeg recording: ${data}`);
-        });
-
-        ffmpeg.on('error', (error) => {
-            console.error(`Error en grabación cámara ${cameraId}:`, error);
-        });
-
-        ffmpeg.on('close', (code) => {
-            console.log(`Grabación cámara ${cameraId} finalizada con código: ${code}`);
-            this.activeRecordings.delete(cameraId);
-            camera.isRecording = false;
-        });
-
-        return { status: 'started', filename };
-    }
-    // Detener grabación
-    stopRecording(cameraId) {
-        const process = this.activeRecordings.get(cameraId);
-        const camera = this.cameras.get(cameraId);
-
-        if (process) {
-            process.kill('SIGTERM');
-            this.activeRecordings.delete(cameraId);
-        }
-
-        if (camera) {
-            camera.isRecording = false;
-        }
-
-        return { status: 'stopped' };
-    }
-
-    // Tomar screenshot
     async takeScreenshot(cameraId) {
         const camera = this.cameras.get(cameraId);
         if (!camera) throw new Error('Cámara no encontrada');
 
+        const screenshotsDir = path.join(process.cwd(), 'public', 'screenshots');
+        fs.mkdirSync(screenshotsDir, { recursive: true });
+
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const filename = `screenshot_camera_${cameraId}_${timestamp}.jpg`;
-        const outputPath = path.join(process.cwd(), 'public', 'screenshots', filename);
+        const outputPath = path.join(screenshotsDir, filename);
 
         return new Promise((resolve, reject) => {
             const ffmpeg = spawn('ffmpeg', [
+                '-fflags', 'nobuffer',
+                '-rtsp_transport', 'tcp',
                 '-i', camera.rtspUrl,
                 '-vframes', '1',
                 '-q:v', '2',
-                '-y', // Sobrescribir si existe
-                outputPath
+                '-y',
+                outputPath,
             ]);
 
             ffmpeg.on('close', (code) => {
@@ -131,95 +134,46 @@ export class CameraManager {
         });
     }
 
-    // Obtener lista de grabaciones
+    saveFrame(cameraId, jpegBuffer) {
+        const screenshotsDir = path.join(process.cwd(), 'public', 'screenshots');
+        fs.mkdirSync(screenshotsDir, { recursive: true });
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `screenshot_camera_${cameraId}_${timestamp}.jpg`;
+        fs.writeFileSync(path.join(screenshotsDir, filename), jpegBuffer);
+        const cam = this.cameras.get(cameraId);
+        if (cam) cam.lastScreenshot = filename;
+        return { filename, path: `/screenshots/${filename}` };
+    }
+
     getRecordings() {
         const recordingsDir = path.join(process.cwd(), 'public', 'recordings');
-
         if (!fs.existsSync(recordingsDir)) {
             fs.mkdirSync(recordingsDir, { recursive: true });
             return [];
         }
-
-        const files = fs.readdirSync(recordingsDir);
-        return files
-            .filter(file => file.endsWith('.mp4'))
-            .map(file => {
-                const stats = fs.statSync(path.join(recordingsDir, file));
-                return {
-                    filename: file,
-                    path: `/recordings/${file}`,
-                    size: stats.size,
-                    created: stats.birthtime
-                };
+        return fs.readdirSync(recordingsDir)
+            .filter(f => f.endsWith('.mp4'))
+            .map(f => {
+                const stats = fs.statSync(path.join(recordingsDir, f));
+                return { filename: f, path: `/recordings/${f}`, size: stats.size, created: stats.birthtime };
             })
             .sort((a, b) => b.created - a.created);
     }
 
-    // Obtener lista de screenshots
     getScreenshots() {
         const screenshotsDir = path.join(process.cwd(), 'public', 'screenshots');
-
         if (!fs.existsSync(screenshotsDir)) {
             fs.mkdirSync(screenshotsDir, { recursive: true });
             return [];
         }
-
-        const files = fs.readdirSync(screenshotsDir);
-        return files
-            .filter(file => file.endsWith('.jpg'))
-            .map(file => {
-                const stats = fs.statSync(path.join(screenshotsDir, file));
-                return {
-                    filename: file,
-                    path: `/screenshots/${file}`,
-                    size: stats.size,
-                    created: stats.birthtime
-                };
+        return fs.readdirSync(screenshotsDir)
+            .filter(f => f.endsWith('.jpg'))
+            .map(f => {
+                const stats = fs.statSync(path.join(screenshotsDir, f));
+                return { filename: f, path: `/screenshots/${f}`, size: stats.size, created: stats.birthtime };
             })
             .sort((a, b) => b.created - a.created);
     }
 }
 
-export class PTZController {
-    constructor(cameraIP, username, password, httpPort = 80) {
-        this.baseUrl = `http://${cameraIP}:${httpPort}`;
-        this.auth = Buffer.from(`${username}:${password}`).toString('base64');
-    }
-
-    async sendCommand(command) {
-        const url = `${this.baseUrl}/cgi-bin/ptz.cgi?action=${command}`;
-
-        try {
-            const response = await fetch(url, {
-                headers: {
-                    'Authorization': `Basic ${this.auth}`
-                }
-            });
-            return await response.text();
-        } catch (error) {
-            console.error('Error PTZ:', error);
-            throw error;
-        }
-    }
-
-    // Movimientos básicos
-    async moveLeft() { return this.sendCommand('moveleft'); }
-    async moveRight() { return this.sendCommand('moveright'); }
-    async moveUp() { return this.sendCommand('moveup'); }
-    async moveDown() { return this.sendCommand('movedown'); }
-    async zoomIn() { return this.sendCommand('zoomin'); }
-    async zoomOut() { return this.sendCommand('zoomout'); }
-    async stop() { return this.sendCommand('stop'); }
-
-    // Presets
-    async goToPreset(presetNumber) {
-        return this.sendCommand(`preset&channel=0&code=${presetNumber}&act=goto`);
-    }
-
-    async setPreset(presetNumber) {
-        return this.sendCommand(`preset&channel=0&code=${presetNumber}&act=set`);
-    }
-}
-
-// Instancia global del manager
 export const cameraManager = new CameraManager();

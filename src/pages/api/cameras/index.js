@@ -9,7 +9,7 @@ export default function handler(req, res) {
     } else if (req.method === 'POST') {
         // Registrar nueva cámara
         try {
-            const { id, name, ip, port, username, password, httpPort } = req.body;
+            const { id, name, ip, port, username, password, httpPort, rtspPath, continuousRecord } = req.body;
 
             cameraManager.registerCamera(id, {
                 name,
@@ -17,7 +17,9 @@ export default function handler(req, res) {
                 port: port || 554,
                 username,
                 password,
-                httpPort: httpPort || 80
+                httpPort: httpPort || 80,
+                rtspPath: rtspPath || '/live',
+                continuousRecord: !!continuousRecord,
             });
 
             res.status(201).json({

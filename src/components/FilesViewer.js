@@ -1,26 +1,41 @@
 import { useState, useEffect } from 'react';
-import { Video, Camera, Download, Calendar, HardDrive } from 'lucide-react';
+import { Video, Camera, Download, X, RefreshCw, HardDrive, Activity } from 'lucide-react';
 
-export default function FilesViewer() {
-    const [recordings, setRecordings] = useState([]);
+function extractCameraId(filename) {
+    let m = filename.match(/^cam_([^_]+)_/);
+    if (m) return m[1];
+    m = filename.match(/^screenshot_camera_([^_]+)_/);
+    if (m) return m[1];
+    return null;
+}
+
+/** @param {{ cameras: { id: string, name: string }[] }} props */
+export default function FilesViewer({ cameras = [] }) {
+    const [recordings, setRecordings]   = useState([]);
     const [screenshots, setScreenshots] = useState([]);
-    const [activeTab, setActiveTab] = useState('recordings');
-    const [loading, setLoading] = useState(false);
+    const [events, setEvents]           = useState([]);
+    const [diskStatus, setDiskStatus]   = useState(null);
+    const [activeTab, setActiveTab]     = useState('recordings');
+    const [activeCam, setActiveCam]     = useState('all');
+    const [loading, setLoading]         = useState(false);
+    const [lightbox, setLightbox]       = useState(null);
 
     const fetchFiles = async () => {
         setLoading(true);
         try {
-            // Obtener grabaciones
-            const recordingsResponse = await fetch('/api/files?type=recordings');
-            const recordingsData = await recordingsResponse.json();
-            setRecordings(recordingsData.recordings || []);
-
-            // Obtener screenshots
-            const screenshotsResponse = await fetch('/api/files?type=screenshots');
-            const screenshotsData = await screenshotsResponse.json();
-            setScreenshots(screenshotsData.screenshots || []);
-        } catch (error) {
-            console.error('Error al cargar archivos:', error);
+            const camFilter = activeCam !== 'all' ? `&cameraId=${activeCam}` : '';
+            const [recRes, ssRes, diskRes, evRes] = await Promise.all([
+                fetch('/api/files?type=recordings'),
+                fetch('/api/files?type=screenshots'),
+                fetch('/api/files?type=disk-status'),
+                fetch(`/api/events?limit=50${camFilter}`),
+            ]);
+            setRecordings((await recRes.json()).recordings || []);
+            setScreenshots((await ssRes.json()).screenshots || []);
+            setDiskStatus(diskRes.ok ? await diskRes.json() : null);
+            setEvents(evRes.ok ? (await evRes.json()).events || [] : []);
+        } catch (e) {
+            console.error(e);
         } finally {
             setLoading(false);
         }
@@ -28,193 +43,335 @@ export default function FilesViewer() {
 
     useEffect(() => {
         fetchFiles();
-        // Actualizar cada 30 segundos
-        const interval = setInterval(fetchFiles, 30000);
-        return () => clearInterval(interval);
-    }, []);
+        const i = setInterval(fetchFiles, 30000);
+        return () => clearInterval(i);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeCam]);
 
-    const formatFileSize = (bytes) => {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    const fmt = {
+        size: (b) => {
+            if (!b) return '0 B';
+            const k = 1024, s = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(b) / Math.log(k));
+            return `${(b / Math.pow(k, i)).toFixed(1)} ${s[i]}`;
+        },
+        date: (d) => new Date(d).toLocaleString('es-AR', {
+            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+        }),
     };
 
-    const formatDate = (date) => {
-        return new Date(date).toLocaleString('es-ES', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    };
+    const camName = (id) => cameras.find(c => c.id === id)?.name ?? id;
 
-    const FileCard = ({ file, type }) => (
-        <div className="border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                    {type === 'recording' ? (
-                        <Video className="w-8 h-8 text-blue-500" />
-                    ) : (
-                        <Camera className="w-8 h-8 text-green-500" />
-                    )}
-                    <div>
-                        <h3 className="font-medium text-gray-900 truncate max-w-xs">
-                            {file.filename}
-                        </h3>
-                        <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
-                            <span className="flex items-center gap-1">
-                                <Calendar className="w-4 h-4" />
-                                {formatDate(file.created)}
-                            </span>
-                            <span className="flex items-center gap-1">
-                                <HardDrive className="w-4 h-4" />
-                                {formatFileSize(file.size)}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-                <a
-                    href={file.path}
-                    download
-                    className="flex items-center gap-1 px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+    // Camera IDs that actually appear in files or events (sorted by id)
+    const camIdsInFiles = [...new Set([
+        ...recordings.map(f => extractCameraId(f.filename)),
+        ...screenshots.map(f => extractCameraId(f.filename)),
+        ...events.map(e => e.cameraId),
+    ])].filter(Boolean).sort();
+
+    const filteredRec = activeCam === 'all'
+        ? recordings
+        : recordings.filter(f => extractCameraId(f.filename) === activeCam);
+    const filteredSS = activeCam === 'all'
+        ? screenshots
+        : screenshots.filter(f => extractCameraId(f.filename) === activeCam);
+
+    return (
+        <div className="space-y-4">
+            {/* Lightbox */}
+            {lightbox && (
+                <div
+                    className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4"
+                    style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+                    onClick={() => setLightbox(null)}
                 >
-                    <Download className="w-4 h-4" />
-                    Descargar
-                </a>
-            </div>
-
-            {type === 'recording' ? (
-                <div className="mt-3">
-                    <video
-                        className="w-full h-32 bg-black rounded object-cover"
-                        controls
-                        preload="metadata"
-                    >
-                        <source src={file.path} type="video/mp4" />
-                        Tu navegador no soporta video HTML5.
-                    </video>
-                </div>
-            ) : (
-                <div className="mt-3">
+                    <button className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center text-white/60 hover:text-white bg-black/40 rounded-xl">
+                        <X className="w-6 h-6" />
+                    </button>
                     <img
-                        src={file.path}
-                        alt="Screenshot"
-                        className="w-full h-32 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
-                        onClick={() => window.open(file.path, '_blank')}
+                        src={lightbox}
+                        alt="Captura"
+                        className="max-w-full max-h-full rounded-xl"
+                        onClick={e => e.stopPropagation()}
                     />
                 </div>
             )}
-        </div>
-    );
 
-    return (
-        <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-2xl font-bold mb-6">Archivos de Vigilancia</h2>
+            {diskStatus && <DiskPanel disk={diskStatus} />}
 
-            {/* Tabs */}
-            <div className="flex space-x-1 mb-6">
-                <button
-                    onClick={() => setActiveTab('recordings')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'recordings'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                >
-                    <Video className="w-4 h-4 inline mr-2" />
-                    Grabaciones ({recordings.length})
-                </button>
-                <button
-                    onClick={() => setActiveTab('screenshots')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === 'screenshots'
-                        ? 'bg-green-500 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                >
-                    <Camera className="w-4 h-4 inline mr-2" />
-                    Capturas ({screenshots.length})
-                </button>
-            </div>
+            {/* Camera filter chips */}
+            {camIdsInFiles.length > 1 && (
+                <div className="flex gap-2 flex-wrap">
+                    <CamChip active={activeCam === 'all'} onClick={() => setActiveCam('all')}>
+                        Todas
+                    </CamChip>
+                    {camIdsInFiles.map(id => (
+                        <CamChip key={id} active={activeCam === id} onClick={() => setActiveCam(id)}>
+                            {camName(id)}
+                        </CamChip>
+                    ))}
+                </div>
+            )}
 
-            {/* Botón de actualizar */}
-            <div className="flex justify-between items-center mb-4">
-                <div className="text-sm text-gray-600">
-                    {activeTab === 'recordings'
-                        ? `${recordings.length} grabaciones encontradas`
-                        : `${screenshots.length} capturas encontradas`
-                    }
+            {/* Tabs + refresh */}
+            <div className="flex items-center gap-2">
+                <div className="flex gap-1 bg-slate-800/80 rounded-xl p-1 flex-1">
+                    <TabBtn active={activeTab === 'recordings'} onClick={() => setActiveTab('recordings')} icon={Video} count={filteredRec.length}>
+                        <span className="hidden sm:inline">Grabaciones</span>
+                        <span className="sm:hidden">Video</span>
+                    </TabBtn>
+                    <TabBtn active={activeTab === 'screenshots'} onClick={() => setActiveTab('screenshots')} icon={Camera} count={filteredSS.length}>
+                        <span className="hidden sm:inline">Capturas</span>
+                        <span className="sm:hidden">Fotos</span>
+                    </TabBtn>
+                    <TabBtn active={activeTab === 'events'} onClick={() => setActiveTab('events')} icon={Activity} count={events.length}>
+                        Eventos
+                    </TabBtn>
                 </div>
                 <button
                     onClick={fetchFiles}
                     disabled={loading}
-                    className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50"
+                    className="w-10 h-10 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-xl transition-colors disabled:opacity-40 shrink-0"
+                    title="Actualizar"
                 >
-                    {loading ? 'Actualizando...' : 'Actualizar'}
+                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                 </button>
             </div>
 
-            {/* Contenido */}
-            {loading ? (
-                <div className="text-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-                    <p className="mt-2 text-gray-600">Cargando archivos...</p>
+            {/* Content */}
+            {loading && !recordings.length && !screenshots.length && !events.length ? (
+                <div className="flex items-center justify-center py-16">
+                    <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                 </div>
+            ) : activeTab === 'recordings' ? (
+                filteredRec.length === 0
+                    ? <EmptyState icon={Video} text="No hay grabaciones" />
+                    : <RecordingList files={filteredRec} fmt={fmt} camName={camName} showCam={activeCam === 'all'} />
+            ) : activeTab === 'screenshots' ? (
+                filteredSS.length === 0
+                    ? <EmptyState icon={Camera} text="No hay capturas" />
+                    : <ScreenshotGrid files={filteredSS} fmt={fmt} camName={camName} showCam={activeCam === 'all'} onOpen={setLightbox} />
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {activeTab === 'recordings' ? (
-                        recordings.length > 0 ? (
-                            recordings.map((file, index) => (
-                                <FileCard key={index} file={file} type="recording" />
-                            ))
-                        ) : (
-                            <div className="col-span-full text-center py-8 text-gray-500">
-                                <Video className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                                No hay grabaciones disponibles
-                            </div>
-                        )
-                    ) : (
-                        screenshots.length > 0 ? (
-                            screenshots.map((file, index) => (
-                                <FileCard key={index} file={file} type="screenshot" />
-                            ))
-                        ) : (
-                            <div className="col-span-full text-center py-8 text-gray-500">
-                                <Camera className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                                No hay capturas disponibles
-                            </div>
-                        )
-                    )}
-                </div>
+                events.length === 0
+                    ? <EmptyState icon={Activity} text="No hay eventos de detección" />
+                    : <EventsList events={events} fmt={fmt} />
             )}
+        </div>
+    );
+}
 
-            {/* Estadísticas */}
-            <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-                <h3 className="font-medium mb-2">Estadísticas de Almacenamiento</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                        <div className="text-gray-600">Total Grabaciones</div>
-                        <div className="font-semibold">{recordings.length}</div>
-                    </div>
-                    <div>
-                        <div className="text-gray-600">Total Capturas</div>
-                        <div className="font-semibold">{screenshots.length}</div>
-                    </div>
-                    <div>
-                        <div className="text-gray-600">Tamaño Grabaciones</div>
-                        <div className="font-semibold">
-                            {formatFileSize(recordings.reduce((total, file) => total + file.size, 0))}
+function CamChip({ active, onClick, children }) {
+    return (
+        <button
+            onClick={onClick}
+            className={`px-3 h-9 rounded-xl text-sm font-medium transition-colors ${
+                active
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+            }`}
+        >
+            {children}
+        </button>
+    );
+}
+
+function TabBtn({ active, onClick, icon: Icon, count, children }) {
+    return (
+        <button
+            onClick={onClick}
+            className={`flex items-center justify-center gap-1.5 flex-1 h-9 rounded-lg text-sm font-medium transition-colors ${
+                active ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
+            }`}
+        >
+            <Icon className="w-4 h-4 shrink-0" />
+            {children}
+            {count > 0 && (
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${active ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-400'}`}>
+                    {count}
+                </span>
+            )}
+        </button>
+    );
+}
+
+function RecordingList({ files, fmt, camName, showCam }) {
+    return (
+        <div className="space-y-3">
+            {files.map((file, i) => {
+                const camId = extractCameraId(file.filename);
+                return (
+                    <div key={i} className="bg-slate-800/80 border border-slate-700/60 rounded-2xl overflow-hidden">
+                        <video
+                            className="w-full bg-black"
+                            controls
+                            preload="none"
+                            src={`/api/recordings/${file.filename}`}
+                        />
+                        <div className="px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                                {showCam && camId && (
+                                    <span className="inline-block text-xs font-semibold text-blue-300 bg-blue-900/40 px-2 py-0.5 rounded-full mb-1">
+                                        {camName(camId)}
+                                    </span>
+                                )}
+                                <div className="text-slate-400 text-xs">
+                                    {fmt.date(file.created)} · {fmt.size(file.size)}
+                                </div>
+                            </div>
+                            <a
+                                href={`/api/recordings/${file.filename}?download=1`}
+                                download
+                                className="shrink-0 w-10 h-10 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl transition-colors"
+                                title="Descargar"
+                            >
+                                <Download className="w-4 h-4" />
+                            </a>
                         </div>
                     </div>
-                    <div>
-                        <div className="text-gray-600">Tamaño Capturas</div>
-                        <div className="font-semibold">
-                            {formatFileSize(screenshots.reduce((total, file) => total + file.size, 0))}
+                );
+            })}
+        </div>
+    );
+}
+
+function ScreenshotGrid({ files, fmt, camName, showCam, onOpen }) {
+    return (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            {files.map((file, i) => {
+                const camId = extractCameraId(file.filename);
+                return (
+                    <div key={i} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden group">
+                        <div
+                            className="aspect-video bg-black cursor-pointer relative"
+                            onClick={() => onOpen(`/api/screenshots/${file.filename}`)}
+                        >
+                            <img
+                                src={`/api/screenshots/${file.filename}`}
+                                alt="Captura"
+                                className="w-full h-full object-cover group-hover:opacity-90 transition-opacity"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
+                                <span className="text-white text-xs bg-black/60 px-2 py-1 rounded">Ver</span>
+                            </div>
+                            {showCam && camId && (
+                                <div className="absolute top-1.5 left-1.5">
+                                    <span className="text-xs font-semibold text-white bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded">
+                                        {camName(camId)}
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                        <div className="px-2.5 py-2 flex items-center justify-between gap-1">
+                            <div className="min-w-0">
+                                {!showCam && camId && (
+                                    <div className="text-xs font-medium text-blue-400 truncate">{camName(camId)}</div>
+                                )}
+                                <div className="text-slate-500 text-xs">{fmt.date(file.created)}</div>
+                            </div>
+                            <a href={`/api/screenshots/${file.filename}?download=1`} download className="shrink-0 text-slate-500 hover:text-slate-300 transition-colors">
+                                <Download className="w-3.5 h-3.5" />
+                            </a>
                         </div>
                     </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function DiskPanel({ disk }) {
+    const { usedGB: used, totalGB: total, availableGB: available, recordingsGB: recGB } = disk;
+    const usedPct = total > 0 ? Math.min((used / total) * 100, 100) : 0;
+    const recPct  = total > 0 ? Math.min((recGB / total) * 100, 100) : 0;
+    const freeColor = available < total * 0.1
+        ? 'text-red-400' : available < total * 0.25 ? 'text-amber-400' : 'text-green-400';
+
+    return (
+        <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <HardDrive className="w-4 h-4 text-slate-400" />
+                    <span className="text-slate-300 text-sm font-medium">Almacenamiento</span>
+                </div>
+                <span className={`text-sm font-semibold ${freeColor}`}>{available.toFixed(1)} GB libres</span>
+            </div>
+            <div className="space-y-1.5">
+                <div className="h-2 rounded-full bg-slate-700 overflow-hidden flex">
+                    <div className="h-full bg-slate-600/80" style={{ width: `${Math.max(usedPct - recPct, 0)}%` }} />
+                    <div className="h-full bg-blue-500" style={{ width: `${recPct}%` }} />
+                </div>
+                <div className="flex justify-between text-xs text-slate-500">
+                    <span>Grabaciones: <span className="text-slate-300 font-medium">{recGB.toFixed(1)} GB</span>
+                        {disk.maxGB ? <span className="text-slate-600"> / {disk.maxGB} GB</span> : ''}</span>
+                    <span>Total: {total.toFixed(0)} GB</span>
                 </div>
             </div>
+            <StorageEstimate available={available} maxGB={disk.maxGB} maxAgeHours={disk.maxAgeHours} />
+        </div>
+    );
+}
+
+function StorageEstimate({ available, maxGB, maxAgeHours }) {
+    const GB_PER_HOUR_PER_CAM = 1.5;
+    const effectiveGB = maxGB > 0 ? Math.min(available, maxGB) : available;
+    return (
+        <div className="border-t border-slate-700/60 pt-3">
+            <p className="text-xs text-slate-500 mb-2">Días grabables estimados <span className="text-slate-600">(≈1.5 GB/h · 1080p)</span></p>
+            <div className="grid grid-cols-4 gap-2">
+                {[1, 2, 3, 4].map(n => {
+                    const days = effectiveGB / (GB_PER_HOUR_PER_CAM * n * 24);
+                    const cappedDays = maxAgeHours > 0 ? Math.min(days, maxAgeHours / 24) : days;
+                    const color = cappedDays >= 14 ? 'text-green-400' : cappedDays >= 7 ? 'text-amber-400' : 'text-red-400';
+                    return (
+                        <div key={n} className="bg-slate-900/60 rounded-xl p-2 text-center">
+                            <div className={`text-xl font-bold ${color}`}>
+                                {cappedDays >= 1 ? Math.floor(cappedDays) : '<1'}
+                            </div>
+                            <div className="text-slate-500 text-xs mt-0.5">{n} cam{n > 1 ? 's' : ''}</div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+function EventsList({ events, fmt }) {
+    return (
+        <div className="space-y-2">
+            {events.map((event, i) => (
+                <div key={event.id ?? i} className="flex gap-3 items-center p-3 bg-slate-800/80 border border-slate-700/60 rounded-2xl">
+                    {event.screenshotPath ? (
+                        <img
+                            src={event.screenshotPath}
+                            alt="Captura"
+                            className="w-16 h-12 object-cover rounded-lg shrink-0"
+                        />
+                    ) : (
+                        <div className="w-16 h-12 bg-slate-700 rounded-lg shrink-0 flex items-center justify-center">
+                            <Activity className="w-5 h-5 text-slate-500" />
+                        </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                        <div className="text-white font-semibold text-sm">
+                            {event.label} <span className="text-slate-400 font-normal">({Math.round(event.confidence * 100)}%)</span>
+                        </div>
+                        <div className="text-slate-400 text-xs">{event.cameraName || event.cameraId}</div>
+                        <div className="text-slate-600 text-xs">{fmt.date(event.timestamp)}</div>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function EmptyState({ icon: Icon, text }) {
+    return (
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <div className="w-14 h-14 bg-slate-800/80 rounded-2xl flex items-center justify-center">
+                <Icon className="w-7 h-7 text-slate-600" />
+            </div>
+            <p className="text-slate-500 text-sm">{text}</p>
         </div>
     );
 }
