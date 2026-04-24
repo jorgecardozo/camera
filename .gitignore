@@ -44,9 +44,10 @@ next-env.d.ts
 # camera config (contains credentials — do not commit)
 cameras.json
 
-# recordings and screenshots (generated at runtime)
+# recordings, screenshots and thumbnails (generated at runtime)
 /public/recordings/
 /public/screenshots/
+/public/thumbnails/
 
 # motion event store (generated at runtime)
 events.json

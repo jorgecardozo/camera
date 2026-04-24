@@ -306,6 +306,7 @@ function RecordingList({ files, fmt, camName, showCam, extractFileTimestamp }) {
                             className="w-full bg-black"
                             controls
                             preload="none"
+                            poster={`/api/files/thumbnail?filename=${encodeURIComponent(file.filename)}`}
                             src={`/api/recordings/${file.filename}`}
                         />
                         <div className="px-4 py-3 flex items-center justify-between gap-3">
