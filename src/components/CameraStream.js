@@ -1,10 +1,41 @@
-import { useState } from 'react';
-import { Camera, Video, Square, Trash2 } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Camera, Video, Square, Trash2, Activity } from 'lucide-react';
+
+const VEHICLE_LABELS = new Set(['Auto', 'Camión', 'Colectivo', 'Moto', 'Bici', 'Barco', 'Avión']);
+const ANIMAL_LABELS  = new Set(['Perro', 'Gato', 'Pájaro', 'Caballo']);
+
+function boxColor(label) {
+    if (label === 'Persona')          return '#f97316'; // orange
+    if (VEHICLE_LABELS.has(label))    return '#60a5fa'; // blue
+    if (ANIMAL_LABELS.has(label))     return '#4ade80'; // green
+    return '#e2e8f0';                                   // slate
+}
 
 export default function CameraStream({ camera, onUpdate }) {
     const [isLoading, setIsLoading] = useState(false);
     const [lastAction, setLastAction] = useState('');
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [boxes, setBoxes] = useState([]);
+    const boxInterval = useRef(null);
+
+    useEffect(() => {
+        if (!camera.motionActive) {
+            setBoxes([]);
+            return;
+        }
+        const poll = async () => {
+            try {
+                const r = await fetch(`/api/cameras/${camera.id}/boxes`);
+                if (r.ok) {
+                    const { boxes: b } = await r.json();
+                    setBoxes(b || []);
+                }
+            } catch (_) {}
+        };
+        poll();
+        boxInterval.current = setInterval(poll, 400);
+        return () => clearInterval(boxInterval.current);
+    }, [camera.motionActive, camera.id]);
 
     const notify = (msg, duration = 3000) => {
         setLastAction(msg);
@@ -45,6 +76,20 @@ export default function CameraStream({ camera, onUpdate }) {
         }
     };
 
+    const handleMotion = async () => {
+        try {
+            const res = await fetch(`/api/cameras/${camera.id}/motion`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: !camera.motionDetect }),
+            });
+            if (res.ok) onUpdate?.();
+            else notify('Error al cambiar detección');
+        } catch (e) {
+            notify(`Error: ${e.message}`);
+        }
+    };
+
     const handleDelete = async () => {
         if (!confirmDelete) { setConfirmDelete(true); return; }
         setIsLoading(true);
@@ -62,7 +107,7 @@ export default function CameraStream({ camera, onUpdate }) {
     return (
         <div className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex flex-col">
             {/* Video */}
-            <div className="relative aspect-video bg-black">
+            <div className={`relative aspect-video bg-black ${camera.motionActive ? 'ring-2 ring-orange-400 ring-inset' : ''}`}>
                 <img
                     src={`/api/cameras/${camera.id}/mjpeg`}
                     alt={camera.name}
@@ -70,14 +115,57 @@ export default function CameraStream({ camera, onUpdate }) {
                     onError={() => notify('Sin señal — verificá la conexión')}
                 />
 
+                {/* Bounding boxes: SVG borders + div labels */}
+                {boxes.length > 0 && <>
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                        {boxes.map((box, i) => (
+                            <rect
+                                key={i}
+                                x={`${box.x * 100}%`}
+                                y={`${box.y * 100}%`}
+                                width={`${box.w * 100}%`}
+                                height={`${box.h * 100}%`}
+                                fill="none"
+                                stroke={boxColor(box.label)}
+                                strokeWidth="2"
+                                rx="2"
+                            />
+                        ))}
+                    </svg>
+                    {boxes.map((box, i) => (
+                        <div
+                            key={i}
+                            className="absolute text-xs font-bold px-1 leading-5 rounded-sm whitespace-nowrap"
+                            style={{
+                                left: `${box.x * 100}%`,
+                                top: box.y > 0.07
+                                    ? `calc(${box.y * 100}% - 20px)`
+                                    : `calc(${box.y * 100}% + 2px)`,
+                                backgroundColor: boxColor(box.label),
+                                color: '#fff',
+                            }}
+                        >
+                            {box.label}{box.conf ? ` ${Math.round(box.conf * 100)}%` : ''}
+                        </div>
+                    ))}
+                </>}
+
+                {/* Motion detected badge (not yet recording) */}
+                {camera.motionActive && !camera.isRecording && (
+                    <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-orange-500/90 backdrop-blur-sm rounded px-2 py-1">
+                        <Activity size={12} className="text-white animate-pulse" />
+                        <span className="text-white text-xs font-bold tracking-wide">MOVIMIENTO</span>
+                    </div>
+                )}
+
                 {/* Recording badge */}
                 {camera.isRecording && (
                     <div className={`absolute top-3 right-3 flex items-center gap-1.5 backdrop-blur-sm rounded px-2 py-1 ${
-                        camera.continuousRecord ? 'bg-amber-600/90' : 'bg-red-600/90'
+                        camera.continuousRecord ? 'bg-amber-600/90' : camera.motionDetect ? 'bg-purple-600/90' : 'bg-red-600/90'
                     }`}>
                         <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
                         <span className="text-white text-xs font-bold tracking-wide">
-                            {camera.continuousRecord ? 'AUTO' : 'REC'}
+                            {camera.continuousRecord ? 'AUTO' : camera.motionDetect ? 'MOV' : 'REC'}
                         </span>
                     </div>
                 )}
@@ -89,10 +177,17 @@ export default function CameraStream({ camera, onUpdate }) {
                             <p className="text-white font-medium text-sm leading-tight">{camera.name}</p>
                             <p className="text-slate-300 text-xs">{camera.ip}</p>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-2 h-2 bg-green-400 rounded-full" />
-                            <span className="text-slate-300 text-xs">EN VIVO</span>
-                        </div>
+                        {camera.isOnline === false ? (
+                            <div className="flex items-center gap-1.5">
+                                <div className="w-2 h-2 bg-red-500 rounded-full" />
+                                <span className="text-red-400 text-xs font-medium">SIN SEÑAL</span>
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-1.5">
+                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                                <span className="text-slate-300 text-xs">EN VIVO</span>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -127,6 +222,19 @@ export default function CameraStream({ camera, onUpdate }) {
                         {camera.isRecording ? 'Detener' : 'Grabar'}
                     </button>
                 )}
+
+                <button
+                    onClick={handleMotion}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                        camera.motionDetect
+                            ? 'bg-purple-600 hover:bg-purple-500 text-white'
+                            : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+                    }`}
+                    title={camera.motionDetect ? 'Desactivar detección de movimiento' : 'Activar detección de movimiento'}
+                >
+                    <Activity size={14} />
+                    Mov.
+                </button>
 
                 <div className="flex-1" />
 
@@ -163,7 +271,6 @@ export default function CameraStream({ camera, onUpdate }) {
                     <p className="text-slate-400 text-xs">{lastAction}</p>
                 </div>
             )}
-
         </div>
     );
 }

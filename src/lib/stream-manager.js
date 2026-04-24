@@ -51,7 +51,7 @@ class StreamManager {
             'pipe:1',
         ]);
 
-        state.process = ffmpeg;
+        state.ffmpegProcess = ffmpeg;
         let buf = Buffer.alloc(0);
 
         ffmpeg.stdout.on('data', (chunk) => {
@@ -82,6 +82,14 @@ class StreamManager {
 
                 state.lastFrame = frame; // kept for motion-triggered screenshots
 
+                // First frame received — mark camera online and reset failure count.
+                if (!state.markedOnline) {
+                    state.markedOnline = true;
+                    state.failCount = 0;
+                    const cam = cameraManager.getCamera(state.cameraId);
+                    if (cam) cam.isOnline = true;
+                }
+
                 const header = Buffer.from(
                     `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`
                 );
@@ -101,11 +109,30 @@ class StreamManager {
 
         ffmpeg.stderr.on('data', () => {});
 
-        ffmpeg.on('close', () => {
-            state.process = null;
+        ffmpeg.on('close', (code, signal) => {
+            if (state.ffmpegProcess !== ffmpeg) return; // stale process
+            state.ffmpegProcess = null;
             buf = Buffer.alloc(0);
+
+            const isSignalKill = signal != null; // killed intentionally
+
+            if (!isSignalKill && code !== 0) {
+                state.failCount = (state.failCount || 0) + 1;
+                if (state.failCount >= 3) {
+                    const cam = cameraManager.getCamera(state.cameraId);
+                    if (cam) cam.isOnline = false;
+                }
+            }
+
             if (state.clients.size > 0) {
-                setTimeout(() => this._spawn(state), 2000);
+                const backoff = isSignalKill
+                    ? 2000
+                    : Math.min(60000, 5000 * Math.pow(2, Math.max(0, (state.failCount || 1) - 1)));
+                state.retryTimer = setTimeout(() => {
+                    state.retryTimer = null;
+                    state.markedOnline = false; // reset so next connection re-marks online
+                    if (state.clients.size > 0) this._spawn(state);
+                }, backoff);
             } else {
                 this.streams.delete(state.cameraId);
             }
@@ -114,7 +141,15 @@ class StreamManager {
 
     _getOrCreate(cameraId, camera) {
         if (this.streams.has(cameraId)) return this.streams.get(cameraId);
-        const state = { cameraId, camera, process: null, clients: new Set() };
+        const state = {
+            cameraId,
+            camera,
+            ffmpegProcess: null,
+            clients: new Set(),
+            failCount: 0,
+            retryTimer: null,
+            markedOnline: false,
+        };
         this.streams.set(cameraId, state);
         this._spawn(state);
         return state;
@@ -128,7 +163,8 @@ class StreamManager {
             if (state.clients.size === 0) {
                 setTimeout(() => {
                     if (state.clients.size === 0) {
-                        state.process?.kill('SIGTERM');
+                        if (state.retryTimer) { clearTimeout(state.retryTimer); state.retryTimer = null; }
+                        state.ffmpegProcess?.kill('SIGTERM');
                         this.streams.delete(cameraId);
                     }
                 }, 15000);
@@ -253,7 +289,8 @@ class StreamManager {
         if (state.clients.size === 0) {
             setTimeout(() => {
                 if (state.clients.size === 0) {
-                    state.process?.kill('SIGTERM');
+                    if (state.retryTimer) { clearTimeout(state.retryTimer); state.retryTimer = null; }
+                    state.ffmpegProcess?.kill('SIGTERM');
                     this.streams.delete(cameraId);
                 }
             }, 15000);
@@ -265,7 +302,8 @@ class StreamManager {
         const viewer = this.streams.get(cameraId);
         if (viewer) {
             viewer.clients.clear();
-            viewer.process?.kill('SIGTERM');
+            if (viewer.retryTimer) { clearTimeout(viewer.retryTimer); viewer.retryTimer = null; }
+            viewer.ffmpegProcess?.kill('SIGTERM');
             this.streams.delete(cameraId);
         }
 
