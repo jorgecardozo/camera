@@ -29,6 +29,7 @@ export default function FilesViewer({ cameras = [] }) {
     const [activeCam, setActiveCam]     = useState('all');
     const [loading, setLoading]         = useState(false);
     const [lightbox, setLightbox]       = useState(null);
+    const [videoModal, setVideoModal]   = useState(null);
     const [dateFilter, setDateFilter]   = useState('');
     const [timeFrom, setTimeFrom]       = useState('');
     const [timeTo, setTimeTo]           = useState('');
@@ -131,7 +132,7 @@ export default function FilesViewer({ cameras = [] }) {
 
     return (
         <div className="space-y-4">
-            {/* Lightbox */}
+            {/* Image lightbox */}
             {lightbox && (
                 <div
                     className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4"
@@ -147,6 +148,42 @@ export default function FilesViewer({ cameras = [] }) {
                         className="max-w-full max-h-full rounded-xl"
                         onClick={e => e.stopPropagation()}
                     />
+                </div>
+            )}
+
+            {/* Video modal */}
+            {videoModal && (
+                <div
+                    className="fixed inset-0 bg-black/95 z-50 flex flex-col items-center justify-center p-4 gap-3"
+                    style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+                    onClick={() => setVideoModal(null)}
+                >
+                    <button className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center text-white/60 hover:text-white bg-black/40 rounded-xl">
+                        <X className="w-6 h-6" />
+                    </button>
+                    <video
+                        className="max-w-full max-h-[80vh] rounded-xl bg-black"
+                        controls
+                        autoPlay
+                        src={`/api/recordings/${videoModal.filename}`}
+                        onClick={e => e.stopPropagation()}
+                    />
+                    <div className="flex items-center gap-4 text-sm text-slate-400">
+                        <span>{videoModal.camName}</span>
+                        <span>·</span>
+                        <span>{videoModal.date}</span>
+                        <span>·</span>
+                        <span>{videoModal.size}</span>
+                        <a
+                            href={`/api/recordings/${videoModal.filename}?download=1`}
+                            download
+                            onClick={e => e.stopPropagation()}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors"
+                        >
+                            <Download className="w-4 h-4" />
+                            Descargar
+                        </a>
+                    </div>
                 </div>
             )}
 
@@ -247,7 +284,7 @@ export default function FilesViewer({ cameras = [] }) {
             ) : activeTab === 'recordings' ? (
                 filteredRec.length === 0
                     ? <EmptyState icon={Video} text="No hay grabaciones" />
-                    : <RecordingList files={filteredRec} fmt={fmt} camName={camName} showCam={activeCam === 'all'} extractFileTimestamp={extractFileTimestamp} />
+                    : <RecordingGrid files={filteredRec} fmt={fmt} camName={camName} showCam={activeCam === 'all'} onOpen={setVideoModal} />
             ) : activeTab === 'screenshots' ? (
                 filteredSS.length === 0
                     ? <EmptyState icon={Camera} text="No hay capturas" />
@@ -295,38 +332,58 @@ function TabBtn({ active, onClick, icon: Icon, count, children }) {
     );
 }
 
-function RecordingList({ files, fmt, camName, showCam, extractFileTimestamp }) {
+function RecordingGrid({ files, fmt, camName, showCam, onOpen }) {
     return (
-        <div className="space-y-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {files.map((file, i) => {
                 const camId = extractCameraId(file.filename);
+                const name = camId ? camName(camId) : '';
                 return (
-                    <div key={i} className="bg-slate-800/80 border border-slate-700/60 rounded-2xl overflow-hidden">
-                        <video
-                            className="w-full bg-black"
-                            controls
-                            preload="none"
-                            poster={`/api/files/thumbnail?filename=${encodeURIComponent(file.filename)}`}
-                            src={`/api/recordings/${file.filename}`}
-                        />
-                        <div className="px-4 py-3 flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                                {showCam && camId && (
-                                    <span className="inline-block text-xs font-semibold text-blue-300 bg-blue-900/40 px-2 py-0.5 rounded-full mb-1">
-                                        {camName(camId)}
-                                    </span>
-                                )}
-                                <div className="text-slate-400 text-xs">
-                                    {fmt.recDate(file.filename)} · {fmt.size(file.size)}
+                    <div key={i} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden group">
+                        <div
+                            className="aspect-video bg-black cursor-pointer relative"
+                            onClick={() => onOpen({
+                                filename: file.filename,
+                                camName: name,
+                                date: fmt.recDate(file.filename),
+                                size: fmt.size(file.size),
+                            })}
+                        >
+                            <img
+                                src={`/api/files/thumbnail?filename=${encodeURIComponent(file.filename)}`}
+                                alt="Preview"
+                                className="w-full h-full object-cover group-hover:opacity-80 transition-opacity"
+                                loading="lazy"
+                            />
+                            {/* Play overlay */}
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
+                                <div className="w-10 h-10 bg-white/20 backdrop-blur rounded-full flex items-center justify-center">
+                                    <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.84Z" />
+                                    </svg>
                                 </div>
+                            </div>
+                            {showCam && name && (
+                                <div className="absolute top-1.5 left-1.5">
+                                    <span className="text-xs font-semibold text-white bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded">
+                                        {name}
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                        <div className="px-2.5 py-2 flex items-center justify-between gap-1">
+                            <div className="min-w-0">
+                                <div className="text-slate-400 text-xs truncate">{fmt.recDate(file.filename)}</div>
+                                <div className="text-slate-600 text-xs">{fmt.size(file.size)}</div>
                             </div>
                             <a
                                 href={`/api/recordings/${file.filename}?download=1`}
                                 download
-                                className="shrink-0 w-10 h-10 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl transition-colors"
+                                onClick={e => e.stopPropagation()}
+                                className="shrink-0 text-slate-500 hover:text-slate-300 transition-colors"
                                 title="Descargar"
                             >
-                                <Download className="w-4 h-4" />
+                                <Download className="w-3.5 h-3.5" />
                             </a>
                         </div>
                     </div>

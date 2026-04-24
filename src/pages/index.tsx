@@ -48,7 +48,7 @@ export default function Home() {
     { id: 'files',   label: 'Archivos', icon: Files },
   ];
 
-  const onlineCount = cameras.filter(c => (c as any).isOnline !== false).length;
+  const onlineCount = cameras.filter(c => (c as Camera & { isOnline?: boolean }).isOnline !== false).length;
 
   return (
     <>
