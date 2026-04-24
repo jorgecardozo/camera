@@ -11,6 +11,8 @@ type Camera = {
   ip: string;
   isRecording?: boolean;
   continuousRecord?: boolean;
+  motionDetect?: boolean;
+  motionActive?: boolean;
 };
 
 export default function Home() {
@@ -32,9 +34,16 @@ export default function Home() {
 
   useEffect(() => {
     fetchCameras();
-    const interval = setInterval(fetchCameras, 10000);
+    const interval = setInterval(fetchCameras, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // Auto-switch to setup tab on first run (no cameras configured)
+  useEffect(() => {
+    if (!loading && cameras.length === 0) {
+      setActiveTab('setup');
+    }
+  }, [loading]); // only run when loading state changes
 
   const tabs = [
     { id: 'cameras', label: 'Cámaras', icon: Video },
@@ -121,10 +130,10 @@ export default function Home() {
           )}
 
           <div className={activeTab === 'setup' ? '' : 'hidden'}>
-            <CameraSetup cameras={cameras} onCameraAdded={() => { fetchCameras(); setActiveTab('cameras'); }} />
+            <CameraSetup cameras={cameras} autoScan={cameras.length === 0} onCameraAdded={() => { fetchCameras(); setActiveTab('cameras'); }} />
           </div>
 
-          {activeTab === 'files' && <FilesViewer />}
+          {activeTab === 'files' && <FilesViewer cameras={cameras} />}
         </main>
       </div>
     </>

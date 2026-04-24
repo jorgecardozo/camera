@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, Wifi, Settings, Search, Zap, X, CheckCircle, AlertTriangle } from 'lucide-react';
+import OnboardingBanner from './OnboardingBanner.js';
 
 // Generate a short camera ID from an IP address last octet.
 function idFromIp(ip) {
@@ -16,8 +17,8 @@ function getRtspPathFromUrl(rtspUrl) {
     }
 }
 
-/** @param {{ onCameraAdded: () => void, cameras: { id: string, ip: string, name: string }[] }} props */
-export default function CameraSetup({ onCameraAdded, cameras = [] }) {
+/** @param {{ onCameraAdded: () => void, cameras: { id: string, ip: string, name: string }[], autoScan?: boolean }} props */
+export default function CameraSetup({ onCameraAdded, cameras = [], autoScan = false }) {
     const registeredIps = new Set(cameras.map(c => c.ip));
     const [showForm, setShowForm]     = useState(false);
     const [formData, setFormData]     = useState({
@@ -34,6 +35,7 @@ export default function CameraSetup({ onCameraAdded, cameras = [] }) {
     const [quickForm, setQuickForm]   = useState({});
     const [addedIps, setAddedIps]     = useState(new Set());
     const [addingAll, setAddingAll]   = useState(false);
+    const [bannerDismissed, setBannerDismissed] = useState(false);
 
     // ── Full form ────────────────────────────────────────────────────────────
 
@@ -214,6 +216,16 @@ export default function CameraSetup({ onCameraAdded, cameras = [] }) {
         }
     };
 
+    // ── Auto-scan on first mount when requested ───────────────────────────────
+
+    const autoScanFiredRef = useRef(false);
+    useEffect(() => {
+        if (autoScan && !autoScanFiredRef.current) {
+            autoScanFiredRef.current = true;
+            handleScan();
+        }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
     const applyScannedIp = (result) => {
         setFormData({
             ...formData,
@@ -235,8 +247,21 @@ export default function CameraSetup({ onCameraAdded, cameras = [] }) {
     const verified   = rtspResults.filter(r => r.status === 'verified' && !addedIps.has(r.ip) && !registeredIps.has(r.ip));
     const canAddAll  = verified.length > 0 && !addingAll;
 
+    const verifiedUnregistered = scanResults.filter(
+        r => r.status === 'verified' && !addedIps.has(r.ip) && !registeredIps.has(r.ip)
+    );
+    const showBanner = autoScan && !bannerDismissed && !scanning && verifiedUnregistered.length > 0;
+
     return (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-6">
+            {showBanner && (
+                <OnboardingBanner
+                    verifiedCameras={verifiedUnregistered}
+                    onAddAll={addAllVerified}
+                    onDismiss={() => setBannerDismissed(true)}
+                    isAdding={addingAll}
+                />
+            )}
             <div className="flex justify-between items-center mb-6">
                 <h2 className="text-xl font-semibold text-slate-100 flex items-center gap-2">
                     <Settings className="w-5 h-5 text-blue-400" />
