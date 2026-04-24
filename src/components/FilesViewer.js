@@ -30,9 +30,8 @@ export default function FilesViewer({ cameras = [] }) {
     const [loading, setLoading]         = useState(false);
     const [lightbox, setLightbox]       = useState(null);
     const [videoModal, setVideoModal]   = useState(null);
-    const [dateFilter, setDateFilter]   = useState('');
-    const [timeFrom, setTimeFrom]       = useState('');
-    const [timeTo, setTimeTo]           = useState('');
+    const [dateFrom, setDateFrom]       = useState('');
+    const [dateTo, setDateTo]           = useState('');
     const [nameFilter, setNameFilter]   = useState('');
 
     const fetchFiles = async () => {
@@ -91,25 +90,13 @@ export default function FilesViewer({ cameras = [] }) {
     ])].filter(Boolean).sort();
 
     const applyDateFilter = (files) => {
-        if (!dateFilter && !timeFrom && !timeTo && !nameFilter) return files;
+        if (!dateFrom && !dateTo && !nameFilter) return files;
         const needle = nameFilter.toLowerCase();
         return files.filter(f => {
-            // Use timestamp from filename (UTC) converted to local time for filtering
             const d = extractFileTimestamp(f.filename) || new Date(f.created);
-            if (dateFilter) {
-                // toLocaleDateString('en-CA') gives YYYY-MM-DD in local timezone
-                if (d.toLocaleDateString('en-CA') !== dateFilter) return false;
-            }
-            if (timeFrom) {
-                const [h, m] = timeFrom.split(':').map(Number);
-                const from = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m, 0);
-                if (d < from) return false;
-            }
-            if (timeTo) {
-                const [h, m] = timeTo.split(':').map(Number);
-                const to = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m, 59);
-                if (d > to) return false;
-            }
+            const dateStr = d.toLocaleDateString('en-CA'); // YYYY-MM-DD in local tz
+            if (dateFrom && dateStr < dateFrom) return false;
+            if (dateTo   && dateStr > dateTo)   return false;
             if (needle) {
                 const camId = extractCameraId(f.filename) || '';
                 const camN  = cameras.find(c => c.id === camId)?.name || '';
@@ -127,8 +114,8 @@ export default function FilesViewer({ cameras = [] }) {
         activeCam === 'all' ? screenshots : screenshots.filter(f => extractCameraId(f.filename) === activeCam)
     );
 
-    const hasDateFilter = dateFilter || timeFrom || timeTo || nameFilter;
-    const clearDateFilter = () => { setDateFilter(''); setTimeFrom(''); setTimeTo(''); setNameFilter(''); };
+    const hasDateFilter = dateFrom || dateTo || nameFilter;
+    const clearDateFilter = () => { setDateFrom(''); setDateTo(''); setNameFilter(''); };
 
     return (
         <div className="space-y-4">
@@ -228,7 +215,7 @@ export default function FilesViewer({ cameras = [] }) {
                 </button>
             </div>
 
-            {/* Date/time filter — only for recordings and screenshots */}
+            {/* Filter bar — only for recordings and screenshots */}
             {activeTab !== 'events' && (
                 <div className="flex flex-wrap items-center gap-2 p-3 bg-slate-800/60 border border-slate-700/60 rounded-xl">
                     <Search className="w-4 h-4 text-slate-500 shrink-0" />
@@ -237,26 +224,21 @@ export default function FilesViewer({ cameras = [] }) {
                         placeholder="Buscar por nombre o cámara..."
                         value={nameFilter}
                         onChange={e => setNameFilter(e.target.value)}
-                        className="bg-slate-900 border border-slate-600/80 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 placeholder:text-slate-600 min-w-0 flex-1 sm:flex-none sm:w-56"
+                        className="bg-slate-900 border border-slate-600/80 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 placeholder:text-slate-600 min-w-0 flex-1 sm:flex-none sm:w-52"
                     />
+                    <span className="text-slate-500 text-xs">Desde</span>
                     <input
                         type="date"
-                        value={dateFilter}
-                        onChange={e => setDateFilter(e.target.value)}
+                        value={dateFrom}
+                        onChange={e => setDateFrom(e.target.value)}
                         className="bg-slate-900 border border-slate-600/80 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 [color-scheme:dark]"
                     />
-                    <span className="text-slate-500 text-sm">de</span>
+                    <span className="text-slate-500 text-xs">hasta</span>
                     <input
-                        type="time"
-                        value={timeFrom}
-                        onChange={e => setTimeFrom(e.target.value)}
-                        className="bg-slate-900 border border-slate-600/80 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 [color-scheme:dark]"
-                    />
-                    <span className="text-slate-500 text-sm">a</span>
-                    <input
-                        type="time"
-                        value={timeTo}
-                        onChange={e => setTimeTo(e.target.value)}
+                        type="date"
+                        value={dateTo}
+                        min={dateFrom}
+                        onChange={e => setDateTo(e.target.value)}
                         className="bg-slate-900 border border-slate-600/80 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 [color-scheme:dark]"
                     />
                     {hasDateFilter && (
