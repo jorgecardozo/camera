@@ -2,18 +2,11 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { cameraManager } from './camera-utils';
+import ffmpegStatic from 'ffmpeg-static';
 
 const SEGMENT_MS = parseInt(process.env.RECORDING_SEGMENT_MINUTES || '30', 10) * 60_000;
+const FFMPEG = process.env.FFMPEG_PATH || ffmpegStatic || 'ffmpeg';
 
-// JPEG SOI (FF D8) and EOI (FF D9) markers.
-// In entropy-coded JPEG data, FF is always followed by 00 (byte stuffing),
-// so FF D9 only appears as the real EOI — safe to use for frame detection.
-function findMarker(buf, b0, b1, from = 0) {
-    for (let i = from; i < buf.length - 1; i++) {
-        if (buf[i] === b0 && buf[i + 1] === b1) return i;
-    }
-    return -1;
-}
 
 class StreamManager {
     constructor() {
@@ -24,10 +17,17 @@ class StreamManager {
 
     // ─── Auto-start on boot ─────────────────────────────────────────────────
 
-    _initContinuous() {
+    async _initContinuous() {
         for (const camera of cameraManager.getAllCameras()) {
             if (camera.continuousRecord || camera.isRecording) {
                 this.startRecorder(camera.id, camera);
+            }
+        }
+        const hasMotion = cameraManager.getAllCameras().some(c => c.motionDetect);
+        if (hasMotion) {
+            const { motionDetector } = await import('./motion-detector.js');
+            for (const camera of cameraManager.getAllCameras()) {
+                if (camera.motionDetect) motionDetector.start(camera.id, camera);
             }
         }
     }
@@ -35,14 +35,15 @@ class StreamManager {
     // ─── Viewer (MJPEG) ─────────────────────────────────────────────────────
 
     _spawn(state) {
-        const ffmpeg = spawn('ffmpeg', [
+        const ffmpeg = spawn(FFMPEG, [
             '-fflags', 'nobuffer',
             '-flags', 'low_delay',
             '-probesize', '32',
             '-analyzeduration', '0',
             '-rtsp_transport', 'tcp',
+            '-timeout', '5000000',
             '-i', state.camera.rtspUrl,
-            '-f', 'image2pipe',
+            '-f', 'mpjpeg',
             '-vcodec', 'mjpeg',
             '-q:v', '3',
             '-r', '25',
@@ -55,15 +56,31 @@ class StreamManager {
 
         ffmpeg.stdout.on('data', (chunk) => {
             buf = Buffer.concat([buf, chunk]);
-            let search = 0;
-            while (true) {
-                const start = findMarker(buf, 0xFF, 0xD8, search);
-                if (start === -1) break;
-                const end = findMarker(buf, 0xFF, 0xD9, start + 2);
-                if (end === -1) break;
 
-                const frame = buf.slice(start, end + 2);
-                search = end + 2;
+            // mpjpeg format includes Content-Length headers so we extract
+            // exactly the right number of bytes per frame — no SOI/EOI scanning
+            // that can mis-assemble frames from partial network data.
+            while (true) {
+                const hEnd = buf.indexOf('\r\n\r\n');
+                if (hEnd === -1) break;
+
+                const headerStr = buf.slice(0, hEnd).toString('latin1');
+                const clMatch = headerStr.match(/Content-Length:\s*(\d+)/i);
+
+                if (!clMatch) {
+                    // Initial multipart Content-Type line — skip it.
+                    buf = buf.slice(hEnd + 4);
+                    continue;
+                }
+
+                const frameSize = parseInt(clMatch[1], 10);
+                const dataStart = hEnd + 4;
+                if (buf.length < dataStart + frameSize) break; // wait for more data
+
+                const frame = buf.slice(dataStart, dataStart + frameSize);
+                buf = buf.slice(dataStart + frameSize);
+
+                state.lastFrame = frame; // kept for motion-triggered screenshots
 
                 const header = Buffer.from(
                     `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`
@@ -78,8 +95,8 @@ class StreamManager {
                     }
                 }
             }
-            buf = search > 0 ? buf.slice(search) : buf;
-            if (buf.length > 4 * 1024 * 1024) buf = Buffer.alloc(0);
+
+            if (buf.length > 8 * 1024 * 1024) buf = Buffer.alloc(0);
         });
 
         ffmpeg.stderr.on('data', () => {});
@@ -121,9 +138,11 @@ class StreamManager {
 
     // ─── Recorder (direct RTSP, c:v copy) ───────────────────────────────────
 
-    startRecorder(cameraId, camera) {
-        if (this.recorders.has(cameraId)) {
-            return { status: 'already_recording', filename: this.recorders.get(cameraId).filename };
+    startRecorder(cameraId, camera, isMotion = false) {
+        const existing = this.recorders.get(cameraId);
+        if (existing) {
+            if (isMotion && !existing.isMotion) return { status: 'manual_active' };
+            return { status: 'already_recording', filename: existing.filename };
         }
 
         const recordingsDir = path.join(process.cwd(), 'public', 'recordings');
@@ -134,9 +153,10 @@ class StreamManager {
         const outputPath = path.join(recordingsDir, filename);
 
         // Direct RTSP copy — zero CPU, original quality, includes audio.
-        const rec = spawn('ffmpeg', [
+        const rec = spawn(FFMPEG, [
             '-fflags', 'nobuffer',
             '-rtsp_transport', 'tcp',
+            '-timeout', '5000000',
             '-i', camera.rtspUrl,
             '-map', '0:v',
             '-c:v', 'copy',
@@ -176,7 +196,7 @@ class StreamManager {
             }, SEGMENT_MS);
         }
 
-        this.recorders.set(cameraId, { process: rec, filename, segmentTimer });
+        this.recorders.set(cameraId, { process: rec, filename, segmentTimer, isMotion });
 
         const cam = cameraManager.getCamera(cameraId);
         if (cam) { cam.isRecording = true; cameraManager._save(); }
@@ -199,6 +219,45 @@ class StreamManager {
 
         if (cam) { cam.isRecording = false; cameraManager._save(); }
         return { status: 'stopped' };
+    }
+
+    stopMotionRecorder(cameraId) {
+        const entry = this.recorders.get(cameraId);
+        if (!entry?.isMotion) return;
+        if (entry.segmentTimer) clearTimeout(entry.segmentTimer);
+        entry.process.kill('SIGTERM');
+        this.recorders.delete(cameraId);
+        const cam = cameraManager.getCamera(cameraId);
+        if (cam) { cam.isRecording = false; cameraManager._save(); }
+    }
+
+    // ─── Motion hold (keeps viewer alive while YOLO reads the MJPEG stream) ───
+
+    getLastFrame(cameraId) {
+        return this.streams.get(cameraId)?.lastFrame ?? null;
+    }
+
+    acquireMotionHold(cameraId, camera) {
+        const state = this._getOrCreate(cameraId, camera);
+        if (state.motionAnchor) return;
+        const anchor = { write: () => {}, on: () => {} };
+        state.motionAnchor = anchor;
+        state.clients.add(anchor);
+    }
+
+    releaseMotionHold(cameraId) {
+        const state = this.streams.get(cameraId);
+        if (!state?.motionAnchor) return;
+        state.clients.delete(state.motionAnchor);
+        state.motionAnchor = null;
+        if (state.clients.size === 0) {
+            setTimeout(() => {
+                if (state.clients.size === 0) {
+                    state.process?.kill('SIGTERM');
+                    this.streams.delete(cameraId);
+                }
+            }, 15000);
+        }
     }
 
     // Force-stop viewer + recorder regardless of continuousRecord (used on delete).

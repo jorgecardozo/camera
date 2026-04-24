@@ -1,0 +1,6 @@
+opencv-python-headless>=4.8
+ultralytics>=8.3
+# torch CPU-only: if GPU is not needed, install with:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+torch>=2.0
+torchvision>=0.15

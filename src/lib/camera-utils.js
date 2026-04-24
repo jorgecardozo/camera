@@ -27,8 +27,13 @@ export class CameraManager {
                 for (const cam of data) {
                     map.set(cam.id, {
                         ...cam,
-                        isRecording: cam.isRecording ?? false,
+                        isRecording: false,          // reset on startup — recorder must be re-started explicitly
                         continuousRecord: cam.continuousRecord ?? false,
+                        motionDetect: cam.motionDetect ?? false,
+                        motionSensitivity: cam.motionSensitivity ?? 0.05,
+                        // Runtime-only fields — always reset on startup
+                        motionActive: false,
+                        motionBoxes: [],
                     });
                 }
                 return map;
@@ -38,8 +43,10 @@ export class CameraManager {
     }
 
     _save() {
-        const data = Array.from(this.cameras.values());
-        fs.writeFileSync(CAMERAS_FILE, JSON.stringify(data, null, 2));
+        const data = Array.from(this.cameras.values()).map(({ motionActive, motionBoxes, ...cam }) => cam);
+        const tmp = CAMERAS_FILE + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+        fs.renameSync(tmp, CAMERAS_FILE);
     }
 
     registerCamera(id, config) {
@@ -55,6 +62,8 @@ export class CameraManager {
             httpUrl: `http://${config.ip}:${config.httpPort || 80}`,
             isRecording: false,
             continuousRecord: !!config.continuousRecord,
+            motionDetect: !!config.motionDetect,
+            motionSensitivity: config.motionSensitivity ?? 0.05,
             lastScreenshot: null,
         });
         this._save();
@@ -106,6 +115,17 @@ export class CameraManager {
 
             ffmpeg.on('error', reject);
         });
+    }
+
+    saveFrame(cameraId, jpegBuffer) {
+        const screenshotsDir = path.join(process.cwd(), 'public', 'screenshots');
+        fs.mkdirSync(screenshotsDir, { recursive: true });
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `screenshot_camera_${cameraId}_${timestamp}.jpg`;
+        fs.writeFileSync(path.join(screenshotsDir, filename), jpegBuffer);
+        const cam = this.cameras.get(cameraId);
+        if (cam) cam.lastScreenshot = filename;
+        return { filename, path: `/screenshots/${filename}` };
     }
 
     getRecordings() {
