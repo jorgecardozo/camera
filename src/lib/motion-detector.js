@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import { cameraManager } from './camera-utils';
 import { notificationManager } from './notification-manager.js';
+import { insertEvent } from './event-store.js';
 
 const MOTION_CLEAR_MS     = 5_000;  // clear visual state after 5s of no detection
 const SCREENSHOT_COOLDOWN = 10_000; // max one auto-screenshot per 10s per camera
@@ -126,7 +127,24 @@ class MotionDetector {
                 if (frame) cameraManager.saveFrame(cameraId, frame);
                 // Telegram notification (fire-and-forget, after screenshot)
                 const cam = cameraManager.getCamera(cameraId);
-                if (cam) notificationManager.notify(cameraId, cam, boxes, frame).catch(() => {});
+                if (cam) {
+                    notificationManager.notify(cameraId, cam, boxes, frame).catch(() => {});
+                    // Log detection event to event store
+                    const primaryBox = boxes[0];
+                    if (primaryBox) {
+                        try {
+                            insertEvent({
+                                cameraId,
+                                cameraName: cam.name,
+                                label: primaryBox.label,
+                                confidence: primaryBox.conf,
+                                screenshotPath: cam.lastScreenshot ? `/api/screenshots/${cam.lastScreenshot}` : null,
+                            });
+                        } catch (err) {
+                            console.error('[motion] failed to insert event:', err.message);
+                        }
+                    }
+                }
             });
         }
     }

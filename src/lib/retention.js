@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { purgeOldEvents } from './event-store.js';
 
 const RECORDINGS_DIR = path.join(process.cwd(), 'public', 'recordings');
 const MAX_AGE_HOURS = parseInt(process.env.MAX_RECORDING_AGE_HOURS || '72', 10);
@@ -27,6 +28,14 @@ function tryDelete(file, reason) {
 }
 
 export function cleanOldRecordings() {
+    // Purge old motion events using the same age window as recordings
+    try {
+        const maxAgeMs = MAX_AGE_HOURS * 3_600_000;
+        purgeOldEvents(maxAgeMs);
+    } catch (err) {
+        console.error('[retention] failed to purge events:', err.message);
+    }
+
     if (!fs.existsSync(RECORDINGS_DIR)) return;
 
     let files = getRecordingFiles();

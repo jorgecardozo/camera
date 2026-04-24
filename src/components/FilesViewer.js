@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Video, Camera, Download, X, RefreshCw, HardDrive } from 'lucide-react';
+import { Video, Camera, Download, X, RefreshCw, HardDrive, Activity } from 'lucide-react';
 
 function extractCameraId(filename) {
     let m = filename.match(/^cam_([^_]+)_/);
@@ -13,6 +13,7 @@ function extractCameraId(filename) {
 export default function FilesViewer({ cameras = [] }) {
     const [recordings, setRecordings]   = useState([]);
     const [screenshots, setScreenshots] = useState([]);
+    const [events, setEvents]           = useState([]);
     const [diskStatus, setDiskStatus]   = useState(null);
     const [activeTab, setActiveTab]     = useState('recordings');
     const [activeCam, setActiveCam]     = useState('all');
@@ -22,14 +23,17 @@ export default function FilesViewer({ cameras = [] }) {
     const fetchFiles = async () => {
         setLoading(true);
         try {
-            const [recRes, ssRes, diskRes] = await Promise.all([
+            const camFilter = activeCam !== 'all' ? `&cameraId=${activeCam}` : '';
+            const [recRes, ssRes, diskRes, evRes] = await Promise.all([
                 fetch('/api/files?type=recordings'),
                 fetch('/api/files?type=screenshots'),
                 fetch('/api/files?type=disk-status'),
+                fetch(`/api/events?limit=50${camFilter}`),
             ]);
             setRecordings((await recRes.json()).recordings || []);
             setScreenshots((await ssRes.json()).screenshots || []);
             setDiskStatus(diskRes.ok ? await diskRes.json() : null);
+            setEvents(evRes.ok ? (await evRes.json()).events || [] : []);
         } catch (e) {
             console.error(e);
         } finally {
@@ -41,7 +45,8 @@ export default function FilesViewer({ cameras = [] }) {
         fetchFiles();
         const i = setInterval(fetchFiles, 30000);
         return () => clearInterval(i);
-    }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeCam]);
 
     const fmt = {
         size: (b) => {
@@ -57,10 +62,11 @@ export default function FilesViewer({ cameras = [] }) {
 
     const camName = (id) => cameras.find(c => c.id === id)?.name ?? id;
 
-    // Camera IDs that actually appear in files (sorted by id)
+    // Camera IDs that actually appear in files or events (sorted by id)
     const camIdsInFiles = [...new Set([
         ...recordings.map(f => extractCameraId(f.filename)),
         ...screenshots.map(f => extractCameraId(f.filename)),
+        ...events.map(e => e.cameraId),
     ])].filter(Boolean).sort();
 
     const filteredRec = activeCam === 'all'
@@ -123,6 +129,13 @@ export default function FilesViewer({ cameras = [] }) {
                     >
                         Capturas ({filteredSS.length})
                     </TabBtn>
+                    <TabBtn
+                        active={activeTab === 'events'}
+                        onClick={() => setActiveTab('events')}
+                        icon={Activity}
+                    >
+                        Eventos ({events.length})
+                    </TabBtn>
                 </div>
                 <button
                     onClick={fetchFiles}
@@ -135,7 +148,7 @@ export default function FilesViewer({ cameras = [] }) {
             </div>
 
             {/* Content */}
-            {loading && !recordings.length && !screenshots.length ? (
+            {loading && !recordings.length && !screenshots.length && !events.length ? (
                 <div className="flex items-center justify-center py-16">
                     <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                 </div>
@@ -143,10 +156,14 @@ export default function FilesViewer({ cameras = [] }) {
                 filteredRec.length === 0
                     ? <EmptyState icon={Video} text="No hay grabaciones" />
                     : <RecordingList files={filteredRec} fmt={fmt} camName={camName} showCam={activeCam === 'all'} />
-            ) : (
+            ) : activeTab === 'screenshots' ? (
                 filteredSS.length === 0
                     ? <EmptyState icon={Camera} text="No hay capturas" />
                     : <ScreenshotGrid files={filteredSS} fmt={fmt} camName={camName} showCam={activeCam === 'all'} onOpen={setLightbox} />
+            ) : (
+                events.length === 0
+                    ? <EmptyState icon={Activity} text="No hay eventos de detección" />
+                    : <EventsList events={events} fmt={fmt} />
             )}
         </div>
     );
@@ -336,6 +353,31 @@ function StorageEstimate({ available, maxGB, maxAgeHours }) {
                     Retención configurada a {maxAgeHours}h ({Math.floor(maxAgeHours / 24)} días). Ajustá MAX_RECORDING_AGE_HOURS en .env.local para vacaciones.
                 </p>
             )}
+        </div>
+    );
+}
+
+function EventsList({ events, fmt }) {
+    return (
+        <div className="space-y-2">
+            {events.map((event, i) => (
+                <div key={event.id ?? i} className="flex gap-3 items-start p-3 bg-slate-800 border border-slate-700 rounded-lg">
+                    {event.screenshotPath && (
+                        <img
+                            src={event.screenshotPath}
+                            alt="Captura"
+                            className="w-20 h-14 object-cover rounded shrink-0"
+                        />
+                    )}
+                    <div className="min-w-0">
+                        <div className="text-white font-medium text-sm">
+                            {event.label} ({Math.round(event.confidence * 100)}%)
+                        </div>
+                        <div className="text-slate-400 text-xs">{event.cameraName || event.cameraId}</div>
+                        <div className="text-slate-500 text-xs">{fmt.date(event.timestamp)}</div>
+                    </div>
+                </div>
+            ))}
         </div>
     );
 }

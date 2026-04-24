@@ -47,3 +47,7 @@ cameras.json
 # recordings and screenshots (generated at runtime)
 /public/recordings/
 /public/screenshots/
+
+# motion event store (generated at runtime)
+events.json
+vigilancia.db
