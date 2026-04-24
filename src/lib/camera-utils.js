@@ -31,9 +31,13 @@ export class CameraManager {
                         continuousRecord: cam.continuousRecord ?? false,
                         motionDetect: cam.motionDetect ?? false,
                         motionSensitivity: cam.motionSensitivity ?? 0.05,
+                        telegramBotToken: cam.telegramBotToken || '',
+                        telegramChatId: cam.telegramChatId || '',
+                        notifyObjects: cam.notifyObjects || null,
                         // Runtime-only fields — always reset on startup
                         motionActive: false,
                         motionBoxes: [],
+                        isOnline: false,
                     });
                 }
                 return map;
@@ -43,7 +47,7 @@ export class CameraManager {
     }
 
     _save() {
-        const data = Array.from(this.cameras.values()).map(({ motionActive, motionBoxes, ...cam }) => cam);
+        const data = Array.from(this.cameras.values()).map(({ motionActive, motionBoxes, isOnline, ...cam }) => cam);
         const tmp = CAMERAS_FILE + '.tmp';
         fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
         fs.renameSync(tmp, CAMERAS_FILE);
@@ -64,9 +68,20 @@ export class CameraManager {
             continuousRecord: !!config.continuousRecord,
             motionDetect: !!config.motionDetect,
             motionSensitivity: config.motionSensitivity ?? 0.05,
+            telegramBotToken: config.telegramBotToken || '',
+            telegramChatId: config.telegramChatId || '',
+            notifyObjects: config.notifyObjects || null,
             lastScreenshot: null,
         });
         this._save();
+    }
+
+    updateCamera(id, fields) {
+        const cam = this.cameras.get(id);
+        if (!cam) return false;
+        Object.assign(cam, fields);
+        this._save();
+        return true;
     }
 
     removeCamera(id) {
