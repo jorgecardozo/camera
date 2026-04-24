@@ -65,7 +65,7 @@ def main():
         sys.exit(1)
 
     rtsp_url   = sys.argv[1]
-    conf_thres = float(sys.argv[2]) if len(sys.argv) > 2 else 0.20
+    conf_thres = float(sys.argv[2]) if len(sys.argv) > 2 else 0.12
 
     # yolo11n.pt (~5.4 MB) downloads automatically on first run.
     # Fast enough for CPU inference when combined with the MOG2 pre-filter.
@@ -118,7 +118,7 @@ def main():
         crop = frame[y1:y2, x1:x2]
 
         # ── YOLO on crop only ─────────────────────────────────────────────────
-        results = model(crop, imgsz=320, conf=conf_thres, verbose=False)[0]
+        results = model(crop, imgsz=480, conf=conf_thres, verbose=False)[0]
 
         boxes = []
         for box in results.boxes:

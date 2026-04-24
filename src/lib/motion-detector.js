@@ -10,10 +10,11 @@ const SCRIPT_PATH = path.join(process.cwd(), 'scripts', 'motion_detector.py');
 const PYTHON      = path.join(process.cwd(), '.venv', 'bin', 'python3');
 
 // motionSensitivity maps to YOLO confidence threshold (0.0–1.0).
-// Legacy values < 0.1 (old MOG2 scene threshold) are remapped to 0.25.
+// Legacy values < 0.1 (old MOG2 scene threshold) are remapped to 0.12.
+// 0.12 is intentionally low to detect people through iron gates and fences.
 function resolveConfidence(sensitivity) {
-    const val = sensitivity ?? 0.20;
-    return (val < 0.1 || val > 1) ? 0.20 : val;
+    const val = sensitivity ?? 0.12;
+    return (val < 0.1 || val > 1) ? 0.12 : val;
 }
 
 // YOLO reads from the in-process MJPEG viewer instead of RTSP directly.
