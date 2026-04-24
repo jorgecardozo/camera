@@ -1,11 +1,21 @@
 import { useState, useEffect } from 'react';
 import { Video, Camera, Download, X, RefreshCw, HardDrive } from 'lucide-react';
 
-export default function FilesViewer() {
+function extractCameraId(filename) {
+    let m = filename.match(/^cam_([^_]+)_/);
+    if (m) return m[1];
+    m = filename.match(/^screenshot_camera_([^_]+)_/);
+    if (m) return m[1];
+    return null;
+}
+
+/** @param {{ cameras: { id: string, name: string }[] }} props */
+export default function FilesViewer({ cameras = [] }) {
     const [recordings, setRecordings]   = useState([]);
     const [screenshots, setScreenshots] = useState([]);
     const [diskStatus, setDiskStatus]   = useState(null);
     const [activeTab, setActiveTab]     = useState('recordings');
+    const [activeCam, setActiveCam]     = useState('all');
     const [loading, setLoading]         = useState(false);
     const [lightbox, setLightbox]       = useState(null);
 
@@ -17,12 +27,9 @@ export default function FilesViewer() {
                 fetch('/api/files?type=screenshots'),
                 fetch('/api/files?type=disk-status'),
             ]);
-            const recData  = await recRes.json();
-            const ssData   = await ssRes.json();
-            const diskData = diskRes.ok ? await diskRes.json() : null;
-            setRecordings(recData.recordings   || []);
-            setScreenshots(ssData.screenshots  || []);
-            setDiskStatus(diskData);
+            setRecordings((await recRes.json()).recordings || []);
+            setScreenshots((await ssRes.json()).screenshots || []);
+            setDiskStatus(diskRes.ok ? await diskRes.json() : null);
         } catch (e) {
             console.error(e);
         } finally {
@@ -48,6 +55,21 @@ export default function FilesViewer() {
         }),
     };
 
+    const camName = (id) => cameras.find(c => c.id === id)?.name ?? id;
+
+    // Camera IDs that actually appear in files (sorted by id)
+    const camIdsInFiles = [...new Set([
+        ...recordings.map(f => extractCameraId(f.filename)),
+        ...screenshots.map(f => extractCameraId(f.filename)),
+    ])].filter(Boolean).sort();
+
+    const filteredRec = activeCam === 'all'
+        ? recordings
+        : recordings.filter(f => extractCameraId(f.filename) === activeCam);
+    const filteredSS = activeCam === 'all'
+        ? screenshots
+        : screenshots.filter(f => extractCameraId(f.filename) === activeCam);
+
     return (
         <div className="space-y-4">
             {/* Lightbox */}
@@ -68,36 +90,40 @@ export default function FilesViewer() {
                 </div>
             )}
 
-            {/* Disk space panel */}
             {diskStatus && <DiskPanel disk={diskStatus} />}
 
-            {/* Header */}
+            {/* Camera filter chips */}
+            {camIdsInFiles.length > 1 && (
+                <div className="flex gap-2 flex-wrap">
+                    <CamChip active={activeCam === 'all'} onClick={() => setActiveCam('all')}>
+                        Todas
+                    </CamChip>
+                    {camIdsInFiles.map(id => (
+                        <CamChip key={id} active={activeCam === id} onClick={() => setActiveCam(id)}>
+                            {camName(id)}
+                        </CamChip>
+                    ))}
+                </div>
+            )}
+
+            {/* Tabs + refresh */}
             <div className="flex items-center justify-between">
                 <div className="flex gap-1 bg-slate-800 rounded-lg p-1">
-                    <button
+                    <TabBtn
+                        active={activeTab === 'recordings'}
                         onClick={() => setActiveTab('recordings')}
-                        className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                            activeTab === 'recordings'
-                                ? 'bg-blue-600 text-white'
-                                : 'text-slate-400 hover:text-slate-200'
-                        }`}
+                        icon={Video}
                     >
-                        <Video className="w-4 h-4" />
-                        Grabaciones ({recordings.length})
-                    </button>
-                    <button
+                        Grabaciones ({filteredRec.length})
+                    </TabBtn>
+                    <TabBtn
+                        active={activeTab === 'screenshots'}
                         onClick={() => setActiveTab('screenshots')}
-                        className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                            activeTab === 'screenshots'
-                                ? 'bg-blue-600 text-white'
-                                : 'text-slate-400 hover:text-slate-200'
-                        }`}
+                        icon={Camera}
                     >
-                        <Camera className="w-4 h-4" />
-                        Capturas ({screenshots.length})
-                    </button>
+                        Capturas ({filteredSS.length})
+                    </TabBtn>
                 </div>
-
                 <button
                     onClick={fetchFiles}
                     disabled={loading}
@@ -109,99 +135,146 @@ export default function FilesViewer() {
             </div>
 
             {/* Content */}
-            {loading && recordings.length === 0 && screenshots.length === 0 ? (
+            {loading && !recordings.length && !screenshots.length ? (
                 <div className="flex items-center justify-center py-16">
                     <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                 </div>
             ) : activeTab === 'recordings' ? (
-                recordings.length === 0 ? (
-                    <EmptyState icon={Video} text="No hay grabaciones" />
-                ) : (
-                    <div className="space-y-3">
-                        {recordings.map((file, i) => (
-                            <div key={i} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-                                <video
-                                    className="w-full max-h-72 bg-black"
-                                    controls
-                                    preload="metadata"
-                                    src={file.path}
-                                />
-                                <div className="px-4 py-3 flex items-center justify-between">
-                                    <div>
-                                        <p className="text-slate-200 text-sm font-medium truncate max-w-xs">{file.filename}</p>
-                                        <p className="text-slate-500 text-xs mt-0.5">{fmt.date(file.created)} · {fmt.size(file.size)}</p>
-                                    </div>
-                                    <a
-                                        href={file.path}
-                                        download
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm transition-colors"
-                                    >
-                                        <Download className="w-4 h-4" />
-                                        Descargar
-                                    </a>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )
+                filteredRec.length === 0
+                    ? <EmptyState icon={Video} text="No hay grabaciones" />
+                    : <RecordingList files={filteredRec} fmt={fmt} camName={camName} showCam={activeCam === 'all'} />
             ) : (
-                screenshots.length === 0 ? (
-                    <EmptyState icon={Camera} text="No hay capturas" />
-                ) : (
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                        {screenshots.map((file, i) => (
-                            <div key={i} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden group">
-                                <div
-                                    className="aspect-video bg-black cursor-pointer relative"
-                                    onClick={() => setLightbox(file.path)}
-                                >
-                                    <img
-                                        src={file.path}
-                                        alt="Captura"
-                                        className="w-full h-full object-cover group-hover:opacity-90 transition-opacity"
-                                    />
-                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
-                                        <span className="text-white text-xs bg-black/60 px-2 py-1 rounded">Ver</span>
-                                    </div>
-                                </div>
-                                <div className="px-2.5 py-2 flex items-center justify-between">
-                                    <p className="text-slate-500 text-xs">{fmt.date(file.created)}</p>
-                                    <a href={file.path} download className="text-slate-500 hover:text-slate-300 transition-colors">
-                                        <Download className="w-3.5 h-3.5" />
-                                    </a>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )
+                filteredSS.length === 0
+                    ? <EmptyState icon={Camera} text="No hay capturas" />
+                    : <ScreenshotGrid files={filteredSS} fmt={fmt} camName={camName} showCam={activeCam === 'all'} onOpen={setLightbox} />
             )}
         </div>
     );
 }
 
+function CamChip({ active, onClick, children }) {
+    return (
+        <button
+            onClick={onClick}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                active
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+            }`}
+        >
+            {children}
+        </button>
+    );
+}
+
+function TabBtn({ active, onClick, icon: Icon, children }) {
+    return (
+        <button
+            onClick={onClick}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                active ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
+            }`}
+        >
+            <Icon className="w-4 h-4" />
+            {children}
+        </button>
+    );
+}
+
+function RecordingList({ files, fmt, camName, showCam }) {
+    return (
+        <div className="space-y-3">
+            {files.map((file, i) => {
+                const camId = extractCameraId(file.filename);
+                return (
+                    <div key={i} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+                        <video
+                            className="w-full max-h-64 bg-black"
+                            controls
+                            preload="metadata"
+                            src={`/api/recordings/${file.filename}`}
+                        />
+                        <div className="px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="min-w-0 flex items-center gap-2.5 flex-wrap">
+                                {showCam && camId && (
+                                    <span className="text-xs font-semibold text-blue-300 bg-blue-900/50 px-2 py-0.5 rounded-full shrink-0">
+                                        {camName(camId)}
+                                    </span>
+                                )}
+                                <span className="text-slate-400 text-xs">
+                                    {fmt.date(file.created)} · {fmt.size(file.size)}
+                                </span>
+                                <span className="text-slate-600 text-xs truncate hidden sm:block">
+                                    {file.filename}
+                                </span>
+                            </div>
+                            <a
+                                href={`/api/recordings/${file.filename}?download=1`}
+                                download
+                                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm transition-colors"
+                            >
+                                <Download className="w-4 h-4" />
+                                Descargar
+                            </a>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function ScreenshotGrid({ files, fmt, camName, showCam, onOpen }) {
+    return (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            {files.map((file, i) => {
+                const camId = extractCameraId(file.filename);
+                return (
+                    <div key={i} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden group">
+                        <div
+                            className="aspect-video bg-black cursor-pointer relative"
+                            onClick={() => onOpen(`/api/screenshots/${file.filename}`)}
+                        >
+                            <img
+                                src={`/api/screenshots/${file.filename}`}
+                                alt="Captura"
+                                className="w-full h-full object-cover group-hover:opacity-90 transition-opacity"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
+                                <span className="text-white text-xs bg-black/60 px-2 py-1 rounded">Ver</span>
+                            </div>
+                            {showCam && camId && (
+                                <div className="absolute top-1.5 left-1.5">
+                                    <span className="text-xs font-semibold text-white bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded">
+                                        {camName(camId)}
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                        <div className="px-2.5 py-2 flex items-center justify-between gap-1">
+                            <div className="min-w-0">
+                                {!showCam && camId && (
+                                    <div className="text-xs font-medium text-blue-400 truncate">{camName(camId)}</div>
+                                )}
+                                <div className="text-slate-500 text-xs">{fmt.date(file.created)}</div>
+                            </div>
+                            <a href={`/api/screenshots/${file.filename}?download=1`} download className="shrink-0 text-slate-500 hover:text-slate-300 transition-colors">
+                                <Download className="w-3.5 h-3.5" />
+                            </a>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
 function DiskPanel({ disk }) {
-    const used      = disk.usedGB;
-    const total     = disk.totalGB;
-    const available = disk.availableGB;
-    const recGB     = disk.recordingsGB;
-
-    // Percentage of total disk used overall
+    const { usedGB: used, totalGB: total, availableGB: available, recordingsGB: recGB } = disk;
     const usedPct = total > 0 ? Math.min((used / total) * 100, 100) : 0;
-    // Percentage used by recordings
     const recPct  = total > 0 ? Math.min((recGB / total) * 100, 100) : 0;
-
     const freeColor = available < total * 0.1
-        ? 'text-red-400'
-        : available < total * 0.25
-            ? 'text-amber-400'
-            : 'text-green-400';
-
-    // How many days can we record with this setup?
-    // Rough estimate: typical WiFi cam RTSP copy ~1 GB/hour at 1080p
-    // Conservative: 2 GB/hour for high-bitrate cameras
-    const estimatedDaysPerCam = recGB > 0 && disk.maxAgeHours > 0
-        ? null  // already limited by retention policy
-        : null;
+        ? 'text-red-400' : available < total * 0.25 ? 'text-amber-400' : 'text-green-400';
 
     return (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3">
@@ -209,55 +282,31 @@ function DiskPanel({ disk }) {
                 <HardDrive className="w-4 h-4 text-slate-400" />
                 <span className="text-slate-300 text-sm font-medium">Almacenamiento</span>
             </div>
-
-            {/* Main bar */}
             <div className="space-y-1.5">
                 <div className="flex justify-between text-xs">
                     <span className="text-slate-400">
                         Grabaciones: <span className="text-slate-200 font-medium">{recGB.toFixed(2)} GB</span>
-                        {disk.maxGB && (
-                            <span className="text-slate-500"> / límite {disk.maxGB} GB</span>
-                        )}
+                        {disk.maxGB && <span className="text-slate-500"> / límite {disk.maxGB} GB</span>}
                     </span>
-                    <span className={`font-medium ${freeColor}`}>
-                        {available.toFixed(1)} GB disponibles
-                    </span>
+                    <span className={`font-medium ${freeColor}`}>{available.toFixed(1)} GB disponibles</span>
                 </div>
-
-                {/* Bar: grey = free, blue = recordings, dark = other usage */}
                 <div className="h-2.5 rounded-full bg-slate-700 overflow-hidden flex">
-                    <div
-                        className="h-full bg-slate-600 transition-all"
-                        style={{ width: `${Math.max(usedPct - recPct, 0)}%` }}
-                        title="Otros archivos del sistema"
-                    />
-                    <div
-                        className="h-full bg-blue-500 transition-all"
-                        style={{ width: `${recPct}%` }}
-                        title="Grabaciones de cámaras"
-                    />
+                    <div className="h-full bg-slate-600" style={{ width: `${Math.max(usedPct - recPct, 0)}%` }} />
+                    <div className="h-full bg-blue-500" style={{ width: `${recPct}%` }} />
                 </div>
-
                 <div className="flex justify-between text-xs text-slate-500">
                     <span>Sistema: {(used - recGB).toFixed(1)} GB</span>
                     <span>Total disco: {total.toFixed(0)} GB</span>
                 </div>
             </div>
-
-            {/* Storage estimate for vacation */}
             <StorageEstimate available={available} maxGB={disk.maxGB} maxAgeHours={disk.maxAgeHours} />
         </div>
     );
 }
 
 function StorageEstimate({ available, maxGB, maxAgeHours }) {
-    // Typical RTSP H.264 stream copy: ~1–2 GB/hour per camera at 1080p
-    // We use 1.5 GB/hour as a middle estimate
     const GB_PER_HOUR_PER_CAM = 1.5;
     const effectiveGB = maxGB > 0 ? Math.min(available, maxGB) : available;
-
-    const camOptions = [1, 2, 3, 4];
-
     return (
         <div className="border-t border-slate-700 pt-3">
             <p className="text-xs text-slate-400 mb-2">
@@ -265,22 +314,16 @@ function StorageEstimate({ available, maxGB, maxAgeHours }) {
                 <span className="text-slate-600"> (≈1.5 GB/h por cámara a 1080p)</span>:
             </p>
             <div className="grid grid-cols-4 gap-2">
-                {camOptions.map(n => {
+                {[1, 2, 3, 4].map(n => {
                     const days = effectiveGB / (GB_PER_HOUR_PER_CAM * n * 24);
                     const cappedDays = maxAgeHours > 0 ? Math.min(days, maxAgeHours / 24) : days;
-                    const color = cappedDays >= 14
-                        ? 'text-green-400'
-                        : cappedDays >= 7
-                            ? 'text-amber-400'
-                            : 'text-red-400';
+                    const color = cappedDays >= 14 ? 'text-green-400' : cappedDays >= 7 ? 'text-amber-400' : 'text-red-400';
                     return (
                         <div key={n} className="bg-slate-900 rounded-lg p-2 text-center">
                             <div className={`text-lg font-bold ${color}`}>
                                 {cappedDays >= 1 ? Math.floor(cappedDays) : '<1'}
                             </div>
-                            <div className="text-slate-500 text-xs">
-                                {n} cám{n > 1 ? 's' : ''}
-                            </div>
+                            <div className="text-slate-500 text-xs">{n} cám{n > 1 ? 's' : ''}</div>
                             {maxAgeHours > 0 && days > maxAgeHours / 24 && (
                                 <div className="text-slate-600 text-xs">límite: {Math.floor(maxAgeHours / 24)}d</div>
                             )}

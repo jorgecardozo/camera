@@ -7,6 +7,7 @@ function idFromIp(ip) {
     return `cam${last}`;
 }
 
+/** @param {{ onCameraAdded: () => void, cameras: { id: string, ip: string, name: string }[] }} props */
 export default function CameraSetup({ onCameraAdded, cameras = [] }) {
     const registeredIps = new Set(cameras.map(c => c.ip));
     const [showForm, setShowForm]     = useState(false);
