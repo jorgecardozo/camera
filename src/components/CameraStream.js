@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Camera, Video, Square, Trash2, Activity } from 'lucide-react';
+import { Camera, Video, Square, Trash2, Activity, Settings } from 'lucide-react';
 
 const VEHICLE_LABELS = new Set(['Auto', 'Camión', 'Colectivo', 'Moto', 'Bici', 'Barco', 'Avión']);
 const ANIMAL_LABELS  = new Set(['Perro', 'Gato', 'Pájaro', 'Caballo']);
@@ -16,6 +16,9 @@ export default function CameraStream({ camera, onUpdate }) {
     const [lastAction, setLastAction] = useState('');
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [boxes, setBoxes] = useState([]);
+    const [showSettings, setShowSettings] = useState(false);
+    const [tgToken, setTgToken] = useState(camera.telegramBotToken || '');
+    const [tgChatId, setTgChatId] = useState(camera.telegramChatId || '');
     const boxInterval = useRef(null);
 
     useEffect(() => {
@@ -87,6 +90,23 @@ export default function CameraStream({ camera, onUpdate }) {
             else notify('Error al cambiar detección');
         } catch (e) {
             notify(`Error: ${e.message}`);
+        }
+    };
+
+    const handleSaveSettings = async () => {
+        setIsLoading(true);
+        try {
+            const res = await fetch(`/api/cameras/${camera.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ telegramBotToken: tgToken.trim(), telegramChatId: tgChatId.trim() }),
+            });
+            notify(res.ok ? 'Configuración guardada' : 'Error al guardar');
+            if (res.ok) setShowSettings(false);
+        } catch (e) {
+            notify(`Error: ${e.message}`);
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -236,6 +256,14 @@ export default function CameraStream({ camera, onUpdate }) {
                     Mov.
                 </button>
 
+                <button
+                    onClick={() => setShowSettings(s => !s)}
+                    className={`p-1.5 transition-colors ${showSettings ? 'text-blue-400' : 'text-slate-600 hover:text-slate-300'}`}
+                    title="Configuración de notificaciones"
+                >
+                    <Settings size={15} />
+                </button>
+
                 <div className="flex-1" />
 
                 {confirmDelete ? (
@@ -264,6 +292,52 @@ export default function CameraStream({ camera, onUpdate }) {
                     </button>
                 )}
             </div>
+
+            {/* Telegram settings panel */}
+            {showSettings && (
+                <div className="px-3 py-3 bg-slate-900 border-t border-slate-700 space-y-2">
+                    <p className="text-xs text-slate-400 font-medium">Notificaciones Telegram</p>
+                    <input
+                        type="text"
+                        placeholder="Bot Token (ej: 123456:ABC-DEF...)"
+                        value={tgToken}
+                        onChange={e => setTgToken(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    />
+                    <input
+                        type="text"
+                        placeholder="Chat ID (ej: -1001234567890)"
+                        value={tgChatId}
+                        onChange={e => setTgChatId(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    />
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={handleSaveSettings}
+                            disabled={isLoading}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-lg text-xs font-medium transition-colors"
+                        >
+                            Guardar
+                        </button>
+                        {(tgToken || tgChatId) && (
+                            <button
+                                onClick={async () => { setTgToken(''); setTgChatId(''); await fetch(`/api/cameras/${camera.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telegramBotToken: '', telegramChatId: '' }) }); notify('Telegram desactivado'); setShowSettings(false); }}
+                                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-xs transition-colors"
+                            >
+                                Desactivar
+                            </button>
+                        )}
+                        <a
+                            href="https://t.me/BotFather"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-slate-500 hover:text-slate-300 transition-colors ml-auto"
+                        >
+                            Crear bot →
+                        </a>
+                    </div>
+                </div>
+            )}
 
             {/* Status bar */}
             {lastAction && (
