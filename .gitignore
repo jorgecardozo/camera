@@ -51,3 +51,11 @@ cameras.json
 # motion event store (generated at runtime)
 events.json
 vigilancia.db
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# YOLO model weights (auto-descargados en el primer arranque)
+*.pt
