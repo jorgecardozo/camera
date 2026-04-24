@@ -237,9 +237,9 @@ export default function CameraSetup({ onCameraAdded, cameras = [], autoScan = fa
         setExpandedIp(null);
     };
 
-    const inputCls  = "w-full bg-slate-900 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 transition-colors placeholder:text-slate-500";
-    const labelCls  = "text-slate-300 text-sm font-medium mb-1 block";
-    const qInputCls = "w-full bg-slate-800 border border-slate-600 text-slate-100 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder:text-slate-500";
+    const inputCls  = "w-full bg-slate-900 border border-slate-600/80 text-slate-100 rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 transition-colors placeholder:text-slate-500";
+    const labelCls  = "text-slate-300 text-sm font-medium mb-1.5 block";
+    const qInputCls = "w-full bg-slate-800 border border-slate-600/80 text-slate-100 rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 transition-colors placeholder:text-slate-500";
 
     const rtspResults    = scanResults.filter(r => r.rtspPort);
     const nonRtspResults = scanResults.filter(r => !r.rtspPort);
@@ -253,7 +253,7 @@ export default function CameraSetup({ onCameraAdded, cameras = [], autoScan = fa
     const showBanner = autoScan && !bannerDismissed && !scanning && verifiedUnregistered.length > 0;
 
     return (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-6">
+        <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 sm:p-6">
             {showBanner && (
                 <OnboardingBanner
                     verifiedCameras={verifiedUnregistered}
@@ -262,26 +262,26 @@ export default function CameraSetup({ onCameraAdded, cameras = [], autoScan = fa
                     isAdding={addingAll}
                 />
             )}
-            <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-semibold text-slate-100 flex items-center gap-2">
+            <div className="flex flex-wrap gap-3 items-center justify-between mb-6">
+                <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
                     <Settings className="w-5 h-5 text-blue-400" />
-                    Configuración de Cámaras
+                    Cámaras
                 </h2>
                 <div className="flex gap-2">
                     <button
                         onClick={handleScan}
                         disabled={scanning}
-                        className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm transition-colors disabled:opacity-40"
+                        className="flex items-center gap-2 h-10 px-4 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-slate-200 rounded-xl text-sm transition-colors disabled:opacity-40"
                     >
                         <Search className="w-4 h-4" />
-                        {scanning ? 'Escaneando...' : 'Escanear Red'}
+                        {scanning ? 'Escaneando...' : 'Escanear'}
                     </button>
                     <button
                         onClick={() => { setShowForm(!showForm); setExpandedIp(null); }}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
+                        className="flex items-center gap-2 h-10 px-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white rounded-xl text-sm font-medium transition-colors"
                     >
                         <Plus className="w-4 h-4" />
-                        Agregar Cámara
+                        Agregar
                     </button>
                 </div>
             </div>
@@ -514,7 +514,7 @@ export default function CameraSetup({ onCameraAdded, cameras = [], autoScan = fa
 
             {/* Full form */}
             {showForm && (
-                <form onSubmit={handleSubmit} className="space-y-4 pt-4 border-t border-slate-700">
+                <form onSubmit={handleSubmit} className="space-y-4 pt-4 border-t border-slate-700/60">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className={labelCls}>ID de Cámara</label>
@@ -558,7 +558,7 @@ export default function CameraSetup({ onCameraAdded, cameras = [], autoScan = fa
                         </div>
                     </div>
 
-                    <label className="flex items-center gap-3 p-3 bg-slate-900 border border-slate-700 rounded-lg cursor-pointer hover:border-slate-600 transition-colors">
+                    <label className="flex items-center gap-3 p-4 bg-slate-900/60 border border-slate-700/60 rounded-xl cursor-pointer hover:border-slate-600 transition-colors">
                         <input
                             type="checkbox"
                             name="continuousRecord"
@@ -568,17 +568,17 @@ export default function CameraSetup({ onCameraAdded, cameras = [], autoScan = fa
                         />
                         <div>
                             <div className="text-slate-200 text-sm font-medium">Grabación continua</div>
-                            <div className="text-slate-500 text-xs">Graba 24/7 automáticamente, creando segmentos de 30 min</div>
+                            <div className="text-slate-500 text-xs">Graba 24/7 automáticamente en segmentos de 30 min</div>
                         </div>
                     </label>
 
                     <div className="flex gap-3">
                         <button type="submit" disabled={isLoading}
-                            className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-40">
+                            className="flex-1 sm:flex-none h-11 px-6 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-40">
                             {isLoading ? 'Agregando...' : 'Agregar Cámara'}
                         </button>
                         <button type="button" onClick={() => setShowForm(false)}
-                            className="px-5 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium transition-colors">
+                            className="flex-1 sm:flex-none h-11 px-6 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-sm font-medium transition-colors">
                             Cancelar
                         </button>
                     </div>

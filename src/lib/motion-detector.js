@@ -58,8 +58,11 @@ class MotionDetector {
                 for (const line of lines) {
                     if (!line.trim()) continue;
                     try {
-                        const { motion, boxes } = JSON.parse(line);
-                        if (motion) this._onMotion(cameraId, camera, boxes || []);
+                        const { motion, boxes, frame_b64 } = JSON.parse(line);
+                        if (motion) {
+                            const annotatedFrame = frame_b64 ? Buffer.from(frame_b64, 'base64') : null;
+                            this._onMotion(cameraId, camera, boxes || [], annotatedFrame);
+                        }
                     } catch (_) {}
                 }
             });
@@ -101,7 +104,7 @@ class MotionDetector {
         return this.detectors.has(cameraId);
     }
 
-    _onMotion(cameraId, camera, boxes) {
+    _onMotion(cameraId, camera, boxes, annotatedFrame) {
         const state = this.detectors.get(cameraId);
         if (!state) return;
 
@@ -123,14 +126,14 @@ class MotionDetector {
         const now = Date.now();
         if (now - state.lastScreenshotAt >= SCREENSHOT_COOLDOWN) {
             state.lastScreenshotAt = now;
+            // Use annotated frame (with boxes drawn) for both screenshot and Telegram.
+            // Fall back to raw MJPEG frame if Python didn't provide one.
             import('./stream-manager.js').then(({ streamManager }) => {
-                const frame = streamManager.getLastFrame(cameraId);
+                const frame = annotatedFrame || streamManager.getLastFrame(cameraId);
                 if (frame) cameraManager.saveFrame(cameraId, frame);
-                // Telegram notification (fire-and-forget, after screenshot)
                 const cam = cameraManager.getCamera(cameraId);
                 if (cam) {
                     notificationManager.notify(cameraId, cam, boxes, frame).catch(() => {});
-                    // Log detection event to event store
                     const primaryBox = boxes[0];
                     if (primaryBox) {
                         try {

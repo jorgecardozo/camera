@@ -81,16 +81,17 @@ export default function FilesViewer({ cameras = [] }) {
             {/* Lightbox */}
             {lightbox && (
                 <div
-                    className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+                    className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4"
+                    style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
                     onClick={() => setLightbox(null)}
                 >
-                    <button className="absolute top-4 right-4 text-white/60 hover:text-white">
-                        <X className="w-8 h-8" />
+                    <button className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center text-white/60 hover:text-white bg-black/40 rounded-xl">
+                        <X className="w-6 h-6" />
                     </button>
                     <img
                         src={lightbox}
                         alt="Captura"
-                        className="max-w-full max-h-full rounded-lg"
+                        className="max-w-full max-h-full rounded-xl"
                         onClick={e => e.stopPropagation()}
                     />
                 </div>
@@ -113,37 +114,27 @@ export default function FilesViewer({ cameras = [] }) {
             )}
 
             {/* Tabs + refresh */}
-            <div className="flex items-center justify-between">
-                <div className="flex gap-1 bg-slate-800 rounded-lg p-1">
-                    <TabBtn
-                        active={activeTab === 'recordings'}
-                        onClick={() => setActiveTab('recordings')}
-                        icon={Video}
-                    >
-                        Grabaciones ({filteredRec.length})
+            <div className="flex items-center gap-2">
+                <div className="flex gap-1 bg-slate-800/80 rounded-xl p-1 flex-1">
+                    <TabBtn active={activeTab === 'recordings'} onClick={() => setActiveTab('recordings')} icon={Video} count={filteredRec.length}>
+                        <span className="hidden sm:inline">Grabaciones</span>
+                        <span className="sm:hidden">Video</span>
                     </TabBtn>
-                    <TabBtn
-                        active={activeTab === 'screenshots'}
-                        onClick={() => setActiveTab('screenshots')}
-                        icon={Camera}
-                    >
-                        Capturas ({filteredSS.length})
+                    <TabBtn active={activeTab === 'screenshots'} onClick={() => setActiveTab('screenshots')} icon={Camera} count={filteredSS.length}>
+                        <span className="hidden sm:inline">Capturas</span>
+                        <span className="sm:hidden">Fotos</span>
                     </TabBtn>
-                    <TabBtn
-                        active={activeTab === 'events'}
-                        onClick={() => setActiveTab('events')}
-                        icon={Activity}
-                    >
-                        Eventos ({events.length})
+                    <TabBtn active={activeTab === 'events'} onClick={() => setActiveTab('events')} icon={Activity} count={events.length}>
+                        Eventos
                     </TabBtn>
                 </div>
                 <button
                     onClick={fetchFiles}
                     disabled={loading}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-sm transition-colors disabled:opacity-40"
+                    className="w-10 h-10 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-xl transition-colors disabled:opacity-40 shrink-0"
+                    title="Actualizar"
                 >
                     <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                    Actualizar
                 </button>
             </div>
 
@@ -173,7 +164,7 @@ function CamChip({ active, onClick, children }) {
     return (
         <button
             onClick={onClick}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-3 h-9 rounded-xl text-sm font-medium transition-colors ${
                 active
                     ? 'bg-blue-600 text-white'
                     : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
@@ -184,16 +175,21 @@ function CamChip({ active, onClick, children }) {
     );
 }
 
-function TabBtn({ active, onClick, icon: Icon, children }) {
+function TabBtn({ active, onClick, icon: Icon, count, children }) {
     return (
         <button
             onClick={onClick}
-            className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            className={`flex items-center justify-center gap-1.5 flex-1 h-9 rounded-lg text-sm font-medium transition-colors ${
                 active ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
             }`}
         >
-            <Icon className="w-4 h-4" />
+            <Icon className="w-4 h-4 shrink-0" />
             {children}
+            {count > 0 && (
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${active ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-400'}`}>
+                    {count}
+                </span>
+            )}
         </button>
     );
 }
@@ -204,34 +200,31 @@ function RecordingList({ files, fmt, camName, showCam }) {
             {files.map((file, i) => {
                 const camId = extractCameraId(file.filename);
                 return (
-                    <div key={i} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+                    <div key={i} className="bg-slate-800/80 border border-slate-700/60 rounded-2xl overflow-hidden">
                         <video
-                            className="w-full max-h-64 bg-black"
+                            className="w-full bg-black"
                             controls
-                            preload="metadata"
+                            preload="none"
                             src={`/api/recordings/${file.filename}`}
                         />
                         <div className="px-4 py-3 flex items-center justify-between gap-3">
-                            <div className="min-w-0 flex items-center gap-2.5 flex-wrap">
+                            <div className="min-w-0">
                                 {showCam && camId && (
-                                    <span className="text-xs font-semibold text-blue-300 bg-blue-900/50 px-2 py-0.5 rounded-full shrink-0">
+                                    <span className="inline-block text-xs font-semibold text-blue-300 bg-blue-900/40 px-2 py-0.5 rounded-full mb-1">
                                         {camName(camId)}
                                     </span>
                                 )}
-                                <span className="text-slate-400 text-xs">
+                                <div className="text-slate-400 text-xs">
                                     {fmt.date(file.created)} · {fmt.size(file.size)}
-                                </span>
-                                <span className="text-slate-600 text-xs truncate hidden sm:block">
-                                    {file.filename}
-                                </span>
+                                </div>
                             </div>
                             <a
                                 href={`/api/recordings/${file.filename}?download=1`}
                                 download
-                                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm transition-colors"
+                                className="shrink-0 w-10 h-10 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl transition-colors"
+                                title="Descargar"
                             >
                                 <Download className="w-4 h-4" />
-                                Descargar
                             </a>
                         </div>
                     </div>
@@ -294,26 +287,23 @@ function DiskPanel({ disk }) {
         ? 'text-red-400' : available < total * 0.25 ? 'text-amber-400' : 'text-green-400';
 
     return (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3">
-            <div className="flex items-center gap-2">
-                <HardDrive className="w-4 h-4 text-slate-400" />
-                <span className="text-slate-300 text-sm font-medium">Almacenamiento</span>
+        <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <HardDrive className="w-4 h-4 text-slate-400" />
+                    <span className="text-slate-300 text-sm font-medium">Almacenamiento</span>
+                </div>
+                <span className={`text-sm font-semibold ${freeColor}`}>{available.toFixed(1)} GB libres</span>
             </div>
             <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                    <span className="text-slate-400">
-                        Grabaciones: <span className="text-slate-200 font-medium">{recGB.toFixed(2)} GB</span>
-                        {disk.maxGB && <span className="text-slate-500"> / límite {disk.maxGB} GB</span>}
-                    </span>
-                    <span className={`font-medium ${freeColor}`}>{available.toFixed(1)} GB disponibles</span>
-                </div>
-                <div className="h-2.5 rounded-full bg-slate-700 overflow-hidden flex">
-                    <div className="h-full bg-slate-600" style={{ width: `${Math.max(usedPct - recPct, 0)}%` }} />
+                <div className="h-2 rounded-full bg-slate-700 overflow-hidden flex">
+                    <div className="h-full bg-slate-600/80" style={{ width: `${Math.max(usedPct - recPct, 0)}%` }} />
                     <div className="h-full bg-blue-500" style={{ width: `${recPct}%` }} />
                 </div>
                 <div className="flex justify-between text-xs text-slate-500">
-                    <span>Sistema: {(used - recGB).toFixed(1)} GB</span>
-                    <span>Total disco: {total.toFixed(0)} GB</span>
+                    <span>Grabaciones: <span className="text-slate-300 font-medium">{recGB.toFixed(1)} GB</span>
+                        {disk.maxGB ? <span className="text-slate-600"> / {disk.maxGB} GB</span> : ''}</span>
+                    <span>Total: {total.toFixed(0)} GB</span>
                 </div>
             </div>
             <StorageEstimate available={available} maxGB={disk.maxGB} maxAgeHours={disk.maxAgeHours} />
@@ -325,34 +315,23 @@ function StorageEstimate({ available, maxGB, maxAgeHours }) {
     const GB_PER_HOUR_PER_CAM = 1.5;
     const effectiveGB = maxGB > 0 ? Math.min(available, maxGB) : available;
     return (
-        <div className="border-t border-slate-700 pt-3">
-            <p className="text-xs text-slate-400 mb-2">
-                Estimación de días grabables con espacio disponible
-                <span className="text-slate-600"> (≈1.5 GB/h por cámara a 1080p)</span>:
-            </p>
+        <div className="border-t border-slate-700/60 pt-3">
+            <p className="text-xs text-slate-500 mb-2">Días grabables estimados <span className="text-slate-600">(≈1.5 GB/h · 1080p)</span></p>
             <div className="grid grid-cols-4 gap-2">
                 {[1, 2, 3, 4].map(n => {
                     const days = effectiveGB / (GB_PER_HOUR_PER_CAM * n * 24);
                     const cappedDays = maxAgeHours > 0 ? Math.min(days, maxAgeHours / 24) : days;
                     const color = cappedDays >= 14 ? 'text-green-400' : cappedDays >= 7 ? 'text-amber-400' : 'text-red-400';
                     return (
-                        <div key={n} className="bg-slate-900 rounded-lg p-2 text-center">
-                            <div className={`text-lg font-bold ${color}`}>
+                        <div key={n} className="bg-slate-900/60 rounded-xl p-2 text-center">
+                            <div className={`text-xl font-bold ${color}`}>
                                 {cappedDays >= 1 ? Math.floor(cappedDays) : '<1'}
                             </div>
-                            <div className="text-slate-500 text-xs">{n} cám{n > 1 ? 's' : ''}</div>
-                            {maxAgeHours > 0 && days > maxAgeHours / 24 && (
-                                <div className="text-slate-600 text-xs">límite: {Math.floor(maxAgeHours / 24)}d</div>
-                            )}
+                            <div className="text-slate-500 text-xs mt-0.5">{n} cam{n > 1 ? 's' : ''}</div>
                         </div>
                     );
                 })}
             </div>
-            {maxAgeHours > 0 && (
-                <p className="text-xs text-slate-600 mt-2">
-                    Retención configurada a {maxAgeHours}h ({Math.floor(maxAgeHours / 24)} días). Ajustá MAX_RECORDING_AGE_HOURS en .env.local para vacaciones.
-                </p>
-            )}
         </div>
     );
 }
@@ -361,20 +340,24 @@ function EventsList({ events, fmt }) {
     return (
         <div className="space-y-2">
             {events.map((event, i) => (
-                <div key={event.id ?? i} className="flex gap-3 items-start p-3 bg-slate-800 border border-slate-700 rounded-lg">
-                    {event.screenshotPath && (
+                <div key={event.id ?? i} className="flex gap-3 items-center p-3 bg-slate-800/80 border border-slate-700/60 rounded-2xl">
+                    {event.screenshotPath ? (
                         <img
                             src={event.screenshotPath}
                             alt="Captura"
-                            className="w-20 h-14 object-cover rounded shrink-0"
+                            className="w-16 h-12 object-cover rounded-lg shrink-0"
                         />
+                    ) : (
+                        <div className="w-16 h-12 bg-slate-700 rounded-lg shrink-0 flex items-center justify-center">
+                            <Activity className="w-5 h-5 text-slate-500" />
+                        </div>
                     )}
-                    <div className="min-w-0">
-                        <div className="text-white font-medium text-sm">
-                            {event.label} ({Math.round(event.confidence * 100)}%)
+                    <div className="min-w-0 flex-1">
+                        <div className="text-white font-semibold text-sm">
+                            {event.label} <span className="text-slate-400 font-normal">({Math.round(event.confidence * 100)}%)</span>
                         </div>
                         <div className="text-slate-400 text-xs">{event.cameraName || event.cameraId}</div>
-                        <div className="text-slate-500 text-xs">{fmt.date(event.timestamp)}</div>
+                        <div className="text-slate-600 text-xs">{fmt.date(event.timestamp)}</div>
                     </div>
                 </div>
             ))}
@@ -384,8 +367,8 @@ function EventsList({ events, fmt }) {
 
 function EmptyState({ icon: Icon, text }) {
     return (
-        <div className="flex flex-col items-center justify-center py-16 gap-3">
-            <div className="w-14 h-14 bg-slate-800 rounded-full flex items-center justify-center">
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <div className="w-14 h-14 bg-slate-800/80 rounded-2xl flex items-center justify-center">
                 <Icon className="w-7 h-7 text-slate-600" />
             </div>
             <p className="text-slate-500 text-sm">{text}</p>

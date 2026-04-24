@@ -33,6 +33,7 @@ export class CameraManager {
                         motionSensitivity: cam.motionSensitivity ?? 0.05,
                         telegramBotToken: cam.telegramBotToken || '',
                         telegramChatId: cam.telegramChatId || '',
+                        telegramEnabled: cam.telegramEnabled ?? false,
                         notifyObjects: cam.notifyObjects || null,
                         // Runtime-only fields — always reset on startup
                         motionActive: false,
@@ -70,6 +71,7 @@ export class CameraManager {
             motionSensitivity: config.motionSensitivity ?? 0.05,
             telegramBotToken: config.telegramBotToken || '',
             telegramChatId: config.telegramChatId || '',
+            telegramEnabled: config.telegramEnabled ?? false,
             notifyObjects: config.notifyObjects || null,
             lastScreenshot: null,
         });

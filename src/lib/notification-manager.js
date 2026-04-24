@@ -7,6 +7,7 @@ class NotificationManager {
     }
 
     async notify(cameraId, camera, boxes, jpegBuffer) {
+        if (!camera.telegramEnabled) return;
         if (!camera.telegramBotToken || !camera.telegramChatId) return;
 
         const allowedObjects = camera.notifyObjects ? new Set(camera.notifyObjects) : NOTIFY_OBJECTS;

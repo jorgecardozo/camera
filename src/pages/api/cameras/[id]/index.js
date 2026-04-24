@@ -15,7 +15,7 @@ export default function handler(req, res) {
 
         res.status(200).json({ message: 'Cámara eliminada' });
     } else if (req.method === 'PATCH') {
-        const ALLOWED = ['telegramBotToken', 'telegramChatId', 'notifyObjects', 'name', 'motionDetect', 'motionSensitivity', 'continuousRecord'];
+        const ALLOWED = ['telegramBotToken', 'telegramChatId', 'telegramEnabled', 'notifyObjects', 'name', 'motionDetect', 'motionSensitivity', 'continuousRecord'];
         const updates = Object.fromEntries(Object.entries(req.body).filter(([k]) => ALLOWED.includes(k)));
         const ok = cameraManager.updateCamera(id, updates);
         return ok ? res.json({ ok: true }) : res.status(404).json({ error: 'Cámara no encontrada' });
