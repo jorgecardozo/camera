@@ -16,13 +16,13 @@ module.exports = {
       },
     },
 
-    // Descomentá este bloque después de correr scripts/setup-tunnel.sh
-    // {
-    //   name: 'tunnel',
-    //   script: 'cloudflared',
-    //   args: 'tunnel run vigilancia',
-    //   autorestart: true,
-    //   watch: false,
-    // },
+    // Cloudflare Tunnel — descomentá después de correr scripts/setup-tunnel.sh
+    {
+      name: 'tunnel',
+      script: 'cloudflared',
+      args: 'tunnel run vigilancia',
+      autorestart: true,
+      watch: false,
+    },
   ],
 };

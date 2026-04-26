@@ -2,8 +2,14 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from './auth.js';
 import { LOCAL_USER_ID } from './db.js';
 
-// Returns the session user ID, or sends 401 and returns null.
-// When APP_PASSWORD is not set (dev / local-only mode), falls back to LOCAL_USER_ID.
+// Returns the user ID to use for data scoping.
+//
+// Single-user mode (Cloudflare Tunnel): APP_PASSWORD is set, but all data lives
+// under LOCAL_USER_ID. NextAuth is just the login gate — whoever is logged in
+// accesses the same local data. This is the right model when one person owns
+// the machine and cameras.
+//
+// Dev mode: APP_PASSWORD empty → skip auth entirely, use LOCAL_USER_ID.
 export async function requireUserId(req, res) {
     if (!process.env.APP_PASSWORD) return LOCAL_USER_ID;
 
@@ -12,5 +18,7 @@ export async function requireUserId(req, res) {
         res.status(401).json({ error: 'No autenticado' });
         return null;
     }
-    return session.user.id;
+
+    // Single-user: all data is under LOCAL_USER_ID regardless of which account logged in
+    return LOCAL_USER_ID;
 }
