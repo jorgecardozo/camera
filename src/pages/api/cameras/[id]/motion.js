@@ -1,15 +1,20 @@
 import { cameraManager } from '../../../../lib/camera-utils';
 import { motionDetector } from '../../../../lib/motion-detector';
+import { requireUserId } from '../../../../lib/session';
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
 
+    const userId = await requireUserId(req, res);
+    if (!userId) return;
+
     const { id } = req.query;
     const camera = cameraManager.getCamera(id);
-    if (!camera) return res.status(404).json({ error: 'Cámara no encontrada' });
+    if (!camera || camera.userId !== userId) {
+        return res.status(404).json({ error: 'Cámara no encontrada' });
+    }
 
     const { enabled } = req.body;
-
     await cameraManager.updateCamera(id, { motionDetect: !!enabled });
 
     if (enabled) {

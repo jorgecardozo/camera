@@ -1,13 +1,19 @@
 import { cameraManager } from '../../../../lib/camera-utils';
 import { streamManager } from '../../../../lib/stream-manager';
+import { requireUserId } from '../../../../lib/session';
 
-export default function handler(req, res) {
+export default async function handler(req, res) {
+    const userId = await requireUserId(req, res);
+    if (!userId) return;
+
     const { id } = req.query;
+    const camera = cameraManager.getCamera(id);
+    if (!camera || camera.userId !== userId) {
+        return res.status(404).json({ error: 'Cámara no encontrada' });
+    }
 
     if (req.method === 'POST') {
         try {
-            const camera = cameraManager.getCamera(id);
-            if (!camera) return res.status(404).json({ error: 'Cámara no encontrada' });
             const result = streamManager.startRecorder(id, camera);
             if (result.status === 'already_recording') return res.status(409).json(result);
             res.status(200).json(result);
