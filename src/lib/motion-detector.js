@@ -136,17 +136,13 @@ class MotionDetector {
                     notificationManager.notify(cameraId, cam, boxes, frame).catch(() => {});
                     const primaryBox = boxes[0];
                     if (primaryBox) {
-                        try {
-                            insertEvent({
-                                cameraId,
-                                cameraName: cam.name,
-                                label: primaryBox.label,
-                                confidence: primaryBox.conf,
-                                screenshotPath: cam.lastScreenshot ? `/api/screenshots/${cam.lastScreenshot}` : null,
-                            });
-                        } catch (err) {
-                            console.error('[motion] failed to insert event:', err.message);
-                        }
+                        insertEvent({
+                            cameraId,
+                            userId: cam.userId,
+                            label: primaryBox.label,
+                            confidence: primaryBox.conf,
+                            screenshotPath: cam.lastScreenshot ? `/api/screenshots/${cam.lastScreenshot}` : null,
+                        }).catch(err => console.error('[motion] failed to insert event:', err.message));
                     }
                 }
             });

@@ -1,17 +1,16 @@
 import { cameraManager } from '../../../lib/camera-utils';
+import { LOCAL_USER_ID } from '../../../lib/db';
 
-export default function handler(req, res) {
+export default async function handler(req, res) {
     if (req.method === 'GET') {
-        // Obtener todas las cámaras
-        const cameras = cameraManager.getAllCameras();
+        const cameras = cameraManager.getAllCameras(LOCAL_USER_ID);
         res.status(200).json({ cameras });
 
     } else if (req.method === 'POST') {
-        // Registrar nueva cámara
         try {
             const { id, name, ip, port, username, password, httpPort, rtspPath, continuousRecord } = req.body;
 
-            cameraManager.registerCamera(id, {
+            await cameraManager.registerCamera(id, {
                 name,
                 ip,
                 port: port || 554,
@@ -20,11 +19,11 @@ export default function handler(req, res) {
                 httpPort: httpPort || 80,
                 rtspPath: rtspPath || '/live',
                 continuousRecord: !!continuousRecord,
-            });
+            }, LOCAL_USER_ID);
 
             res.status(201).json({
                 message: 'Cámara registrada exitosamente',
-                camera: cameraManager.getCamera(id)
+                camera: cameraManager.getCamera(id),
             });
         } catch (error) {
             res.status(500).json({ error: error.message });

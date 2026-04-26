@@ -27,11 +27,11 @@ function tryDelete(file, reason) {
     }
 }
 
-export function cleanOldRecordings() {
+export async function cleanOldRecordings() {
     // Purge old motion events using the same age window as recordings
     try {
         const maxAgeMs = MAX_AGE_HOURS * 3_600_000;
-        purgeOldEvents(maxAgeMs);
+        await purgeOldEvents(maxAgeMs);
     } catch (err) {
         console.error('[retention] failed to purge events:', err.message);
     }
@@ -99,5 +99,5 @@ export function getDiskStatus() {
 }
 
 // Run on module load and then every hour.
-cleanOldRecordings();
-setInterval(cleanOldRecordings, 3_600_000);
+cleanOldRecordings().catch(err => console.error('[retention] startup cleanup failed:', err.message));
+setInterval(() => cleanOldRecordings().catch(err => console.error('[retention] cleanup failed:', err.message)), 3_600_000);

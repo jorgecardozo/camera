@@ -1,98 +1,140 @@
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { prisma, LOCAL_USER_ID, ensureLocalUser } from './db.js';
+import { encryptCredentials, decryptCredentials } from './crypto.js';
 import './retention'; // register startup cleanup + hourly interval
 
-const CAMERAS_FILE = path.join(process.cwd(), 'cameras.json');
-
-function buildRtspUrl(config) {
-    const host = `${config.ip}:${config.port || 554}`;
-    const path_ = config.rtspPath || '/live';
+export function buildRtspUrl(config) {
+    const host  = `${config.ip}:${config.port || 554}`;
+    const rtspPath = config.rtspPath || '/live';
     const user  = config.username || '';
     const pass  = config.password || '';
-    if (user || pass) return `rtsp://${user}:${pass}@${host}${path_}`;
-    return `rtsp://${host}${path_}`;
+    if (user || pass) return `rtsp://${user}:${pass}@${host}${rtspPath}`;
+    return `rtsp://${host}${rtspPath}`;
+}
+
+function toRuntimeCamera(dbCam) {
+    const { username = '', password = '' } = decryptCredentials(dbCam.credentialsEncrypted);
+    return {
+        id: dbCam.id,
+        userId: dbCam.userId,
+        name: dbCam.name,
+        ip: dbCam.ip,
+        port: dbCam.port,
+        httpPort: dbCam.httpPort,
+        rtspPath: dbCam.rtspPath,
+        credentialsEncrypted: dbCam.credentialsEncrypted,
+        rtspUrl: buildRtspUrl({ ip: dbCam.ip, port: dbCam.port, rtspPath: dbCam.rtspPath, username, password }),
+        httpUrl: `http://${dbCam.ip}:${dbCam.httpPort}`,
+        continuousRecord: dbCam.continuousRecord,
+        motionDetect: dbCam.motionDetect,
+        motionSensitivity: dbCam.motionSensitivity,
+        telegramBotToken: dbCam.telegramBotToken,
+        telegramChatId: dbCam.telegramChatId,
+        telegramEnabled: dbCam.telegramEnabled,
+        notifyObjects: dbCam.notifyObjects,
+        // Runtime-only — always reset on server start
+        isRecording: false,
+        motionActive: false,
+        motionBoxes: [],
+        isOnline: false,
+        lastScreenshot: null,
+    };
 }
 
 export class CameraManager {
     constructor() {
-        this.cameras = this._load();
+        this.cameras = new Map();
     }
 
-    _load() {
-        try {
-            if (fs.existsSync(CAMERAS_FILE)) {
-                const data = JSON.parse(fs.readFileSync(CAMERAS_FILE, 'utf-8'));
-                const map = new Map();
-                for (const cam of data) {
-                    map.set(cam.id, {
-                        ...cam,
-                        isRecording: false,          // reset on startup — recorder must be re-started explicitly
-                        continuousRecord: cam.continuousRecord ?? false,
-                        motionDetect: cam.motionDetect ?? false,
-                        motionSensitivity: cam.motionSensitivity ?? 0.05,
-                        telegramBotToken: cam.telegramBotToken || '',
-                        telegramChatId: cam.telegramChatId || '',
-                        telegramEnabled: cam.telegramEnabled ?? false,
-                        notifyObjects: cam.notifyObjects || null,
-                        // Runtime-only fields — always reset on startup
-                        motionActive: false,
-                        motionBoxes: [],
-                        isOnline: false,
-                    });
-                }
-                return map;
-            }
-        } catch (_) {}
-        return new Map();
+    async loadFromDb() {
+        const rows = await prisma.camera.findMany();
+        for (const row of rows) {
+            this.cameras.set(row.id, toRuntimeCamera(row));
+        }
     }
 
-    _save() {
-        const data = Array.from(this.cameras.values()).map(({ motionActive, motionBoxes, isOnline, ...cam }) => cam);
-        const tmp = CAMERAS_FILE + '.tmp';
-        fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-        fs.renameSync(tmp, CAMERAS_FILE);
-    }
+    async registerCamera(id, config, userId = LOCAL_USER_ID) {
+        const { username = '', password = '' } = config;
+        const credentialsEncrypted = (username || password)
+            ? encryptCredentials({ username, password })
+            : '';
 
-    registerCamera(id, config) {
-        this.cameras.set(id, {
-            id,
-            name: config.name,
-            ip: config.ip,
-            port: config.port || 554,
-            username: config.username,
-            password: config.password,
-            httpPort: config.httpPort || 80,
-            rtspUrl: buildRtspUrl(config),
-            httpUrl: `http://${config.ip}:${config.httpPort || 80}`,
-            isRecording: false,
-            continuousRecord: !!config.continuousRecord,
-            motionDetect: !!config.motionDetect,
-            motionSensitivity: config.motionSensitivity ?? 0.05,
-            telegramBotToken: config.telegramBotToken || '',
-            telegramChatId: config.telegramChatId || '',
-            telegramEnabled: config.telegramEnabled ?? false,
-            notifyObjects: config.notifyObjects || null,
-            lastScreenshot: null,
+        const dbCam = await prisma.camera.create({
+            data: {
+                id,
+                userId,
+                name: config.name,
+                ip: config.ip,
+                port: config.port || 554,
+                httpPort: config.httpPort || 80,
+                rtspPath: config.rtspPath || '/live',
+                credentialsEncrypted,
+                continuousRecord: !!config.continuousRecord,
+                motionDetect: !!config.motionDetect,
+                motionSensitivity: config.motionSensitivity ?? 0.12,
+                telegramBotToken: config.telegramBotToken || '',
+                telegramChatId: config.telegramChatId || '',
+                telegramEnabled: config.telegramEnabled ?? false,
+                notifyObjects: config.notifyObjects || null,
+            },
         });
-        this._save();
+
+        this.cameras.set(id, toRuntimeCamera(dbCam));
     }
 
-    updateCamera(id, fields) {
+    async updateCamera(id, fields) {
         const cam = this.cameras.get(id);
         if (!cam) return false;
+
+        const runtimeOnly = new Set([
+            'isRecording', 'motionActive', 'motionBoxes', 'isOnline',
+            'lastScreenshot', 'rtspUrl', 'httpUrl', 'credentialsEncrypted',
+            'userId',
+        ]);
+
+        const dbFields = {};
+        for (const [k, v] of Object.entries(fields)) {
+            if (!runtimeOnly.has(k)) dbFields[k] = v;
+        }
+
+        if ('username' in fields || 'password' in fields) {
+            const { username: oldUser = '', password: oldPass = '' } = decryptCredentials(cam.credentialsEncrypted || '');
+            const newUser = fields.username ?? oldUser;
+            const newPass = fields.password ?? oldPass;
+            dbFields.credentialsEncrypted = encryptCredentials({ username: newUser, password: newPass });
+            delete dbFields.username;
+            delete dbFields.password;
+        }
+
+        if (Object.keys(dbFields).length > 0) {
+            await prisma.camera.update({ where: { id }, data: dbFields });
+            if (dbFields.credentialsEncrypted !== undefined) {
+                cam.credentialsEncrypted = dbFields.credentialsEncrypted;
+            }
+        }
+
         Object.assign(cam, fields);
-        this._save();
+
+        // Rebuild rtspUrl if connection params changed
+        if ('ip' in fields || 'port' in fields || 'rtspPath' in fields ||
+            'username' in fields || 'password' in fields) {
+            const { username = '', password = '' } = decryptCredentials(cam.credentialsEncrypted || '');
+            cam.rtspUrl = buildRtspUrl({ ip: cam.ip, port: cam.port, rtspPath: cam.rtspPath, username, password });
+        }
+
         return true;
     }
 
-    removeCamera(id) {
+    async removeCamera(id) {
+        await prisma.camera.delete({ where: { id } });
         this.cameras.delete(id);
-        this._save();
     }
 
-    getAllCameras() {
-        return Array.from(this.cameras.values());
+    getAllCameras(userId) {
+        const all = Array.from(this.cameras.values());
+        return userId ? all.filter(c => c.userId === userId) : all;
     }
 
     getCamera(id) {
@@ -177,3 +219,8 @@ export class CameraManager {
 }
 
 export const cameraManager = new CameraManager();
+
+// On module init: seed local user then load all cameras from DB
+ensureLocalUser()
+    .then(() => cameraManager.loadFromDb())
+    .catch(err => console.error('[camera] DB init failed:', err.message));

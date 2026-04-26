@@ -60,3 +60,5 @@ __pycache__/
 
 # YOLO model weights (auto-descargados en el primer arranque)
 *.pt
+
+/src/generated/prisma

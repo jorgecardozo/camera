@@ -217,7 +217,7 @@ class StreamManager {
                 this.recorders.delete(cameraId);
             }
             const cam = cameraManager.getCamera(cameraId);
-            if (cam) { cam.isRecording = false; cameraManager._save(); }
+            if (cam) cam.isRecording = false;
 
             // Restart segment for continuous mode.
             if (camera.continuousRecord) {
@@ -235,7 +235,7 @@ class StreamManager {
         this.recorders.set(cameraId, { process: rec, filename, segmentTimer, isMotion });
 
         const cam = cameraManager.getCamera(cameraId);
-        if (cam) { cam.isRecording = true; cameraManager._save(); }
+        if (cam) cam.isRecording = true;
 
         return { status: 'started', filename };
     }
@@ -253,7 +253,7 @@ class StreamManager {
         entry.process.kill('SIGTERM');
         this.recorders.delete(cameraId);
 
-        if (cam) { cam.isRecording = false; cameraManager._save(); }
+        if (cam) cam.isRecording = false;
         return { status: 'stopped' };
     }
 
@@ -264,7 +264,7 @@ class StreamManager {
         entry.process.kill('SIGTERM');
         this.recorders.delete(cameraId);
         const cam = cameraManager.getCamera(cameraId);
-        if (cam) { cam.isRecording = false; cameraManager._save(); }
+        if (cam) cam.isRecording = false;
     }
 
     // ─── Motion hold (keeps viewer alive while YOLO reads the MJPEG stream) ───

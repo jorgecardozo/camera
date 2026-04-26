@@ -1,56 +1,45 @@
-import fs from 'fs';
-import path from 'path';
+import { prisma } from './db.js';
 
-const EVENTS_FILE = path.join(process.cwd(), 'events.json');
-const MAX_EVENTS_IN_MEMORY = 5000;
-
-let events = null;
-
-function load() {
-    if (events !== null) return;
-    try {
-        events = JSON.parse(fs.readFileSync(EVENTS_FILE, 'utf-8'));
-    } catch {
-        events = [];
-    }
-}
-
-function save() {
-    // Keep only the most recent MAX_EVENTS_IN_MEMORY events
-    if (events.length > MAX_EVENTS_IN_MEMORY) {
-        events = events.slice(events.length - MAX_EVENTS_IN_MEMORY);
-    }
-    const tmp = EVENTS_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(events));
-    fs.renameSync(tmp, EVENTS_FILE);
-}
-
-export function insertEvent({ cameraId, cameraName, label, confidence, screenshotPath }) {
-    load();
-    const now = Date.now();
-    events.push({
-        id: now,
-        cameraId,
-        cameraName,
-        timestamp: now,
-        label,
-        confidence,
-        screenshotPath: screenshotPath ?? null,
+export async function insertEvent({ cameraId, userId, label, confidence, screenshotPath }) {
+    await prisma.event.create({
+        data: {
+            cameraId,
+            userId,
+            timestamp: BigInt(Date.now()),
+            label,
+            confidence,
+            screenshotPath: screenshotPath ?? null,
+        },
     });
-    save();
 }
 
-export function getEvents({ cameraId, limit = 50, offset = 0 } = {}) {
-    load();
-    const filtered = cameraId ? events.filter(e => e.cameraId === cameraId) : events;
-    const sorted = filtered.slice().sort((a, b) => b.timestamp - a.timestamp);
-    return sorted.slice(offset, offset + limit);
+export async function getEvents({ cameraId, userId, limit = 50, offset = 0 } = {}) {
+    const where = {};
+    if (cameraId) where.cameraId = cameraId;
+    if (userId) where.userId = userId;
+
+    const rows = await prisma.event.findMany({
+        where,
+        include: { camera: { select: { name: true } } },
+        orderBy: { timestamp: 'desc' },
+        take: limit,
+        skip: offset,
+    });
+
+    return rows.map(e => ({
+        id: e.id,
+        cameraId: e.cameraId,
+        cameraName: e.camera?.name ?? '',
+        timestamp: Number(e.timestamp),
+        label: e.label,
+        confidence: e.confidence,
+        screenshotPath: e.screenshotPath,
+    }));
 }
 
-export function purgeOldEvents(maxAgeMs) {
-    load();
-    const cutoff = Date.now() - maxAgeMs;
-    const before = events.length;
-    events = events.filter(e => e.timestamp >= cutoff);
-    if (events.length !== before) save();
+export async function purgeOldEvents(maxAgeMs) {
+    const cutoff = BigInt(Date.now() - maxAgeMs);
+    await prisma.event.deleteMany({
+        where: { timestamp: { lt: cutoff } },
+    });
 }

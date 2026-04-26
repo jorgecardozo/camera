@@ -1,7 +1,7 @@
 import { cameraManager } from '../../../../lib/camera-utils';
 import { motionDetector } from '../../../../lib/motion-detector';
 
-export default function handler(req, res) {
+export default async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
 
     const { id } = req.query;
@@ -10,8 +10,7 @@ export default function handler(req, res) {
 
     const { enabled } = req.body;
 
-    camera.motionDetect = !!enabled;
-    cameraManager._save();
+    await cameraManager.updateCamera(id, { motionDetect: !!enabled });
 
     if (enabled) {
         motionDetector.stop(id);
@@ -20,5 +19,5 @@ export default function handler(req, res) {
         motionDetector.stop(id);
     }
 
-    res.json({ status: 'ok', motionDetect: camera.motionDetect });
+    res.json({ status: 'ok', motionDetect: !!enabled });
 }
