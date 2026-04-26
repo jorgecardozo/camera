@@ -1,0 +1,56 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String
+  cameras   Camera[]
+  events    Event[]
+  createdAt DateTime @default(now())
+}
+
+model Camera {
+  id                   String   @id @default(cuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                 String
+  ip                   String
+  port                 Int      @default(554)
+  httpPort             Int      @default(80)
+  rtspPath             String   @default("/live")
+  credentialsEncrypted String   @default("")
+  continuousRecord     Boolean  @default(false)
+  motionDetect         Boolean  @default(false)
+  motionSensitivity    Float    @default(0.12)
+  telegramBotToken     String   @default("")
+  telegramChatId       String   @default("")
+  telegramEnabled      Boolean  @default(false)
+  notifyObjects        String?
+  createdAt            DateTime @default(now())
+  events               Event[]
+}
+
+model Event {
+  id             String  @id @default(cuid())
+  cameraId       String
+  camera         Camera  @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timestamp      BigInt
+  label          String
+  confidence     Float
+  screenshotPath String?
+}
