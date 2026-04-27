@@ -49,6 +49,9 @@ cameras.json
 /public/screenshots/
 /public/thumbnails/
 
+# server logs
+/logs/
+
 # motion event store (generated at runtime)
 events.json
 vigilancia.db
