@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
+import { signOut } from 'next-auth/react';
 import CameraStream from '../components/CameraStream';
 import CameraSetup from '../components/CameraSetup';
 import FilesViewer from '../components/FilesViewer';
-import { Shield, Video, Settings, Files } from 'lucide-react';
+import { Shield, Video, Settings, Files, LogOut } from 'lucide-react';
 
 type Camera = {
   id: string;
@@ -79,6 +80,13 @@ export default function Home() {
                   <span className="text-green-400 text-xs font-medium">{onlineCount} en línea</span>
                 </div>
               )}
+              <button
+                onClick={() => signOut({ callbackUrl: '/auth/login' })}
+                className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
+                title="Cerrar sesión"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
