@@ -18,26 +18,40 @@ Current cameras:
 - **Live view**: FFmpeg MJPEG decode → multipart HTTP stream (`/api/cameras/[id]/mjpeg`)
 - **Recording**: FFmpeg direct RTSP copy (`-c:v copy`) to MP4 — zero CPU, original quality
 - **Two independent FFmpeg processes per camera**: one for viewer, one for recorder
-- **Config**: `cameras.json` (flat file, no database, git-ignored)
-- **Auth**: HTTP Basic Auth via `src/middleware.ts` (APP_PASSWORD env var)
+- **Database**: Prisma 7 + SQLite (`prisma/dev.db`) via `@prisma/adapter-better-sqlite3`
+- **Auth**: NextAuth v4 con CredentialsProvider + JWT sessions (`src/lib/auth.js`)
+- **Single-user mode**: NextAuth es solo el gate de login — todos los datos viven bajo `LOCAL_USER_ID='local'`
+- **Internet access**: Cloudflare Tunnel → `https://cam.jcsolutions.dev`
 
 ## Key Files
 
 - `src/lib/stream-manager.js` — manages viewer streams and recorders
-- `src/lib/camera-utils.js` — CameraManager (load/save cameras.json), PTZController, buildRtspUrl()
+- `src/lib/camera-utils.js` — CameraManager (Prisma CRUD + in-memory Map), PTZController, buildRtspUrl()
+- `src/lib/db.js` — Prisma singleton con better-sqlite3 adapter + ensureLocalUser()
+- `src/lib/auth.js` — authOptions de NextAuth (exportado para reuso en API routes)
+- `src/lib/session.js` — requireUserId() helper (single-user mode)
+- `src/lib/crypto.js` — AES-256-GCM encrypt/decrypt para credenciales RTSP en DB
+- `src/lib/event-store.js` — insertEvent / getEvents / purgeOldEvents via Prisma
 - `src/lib/retention.js` — disk cleanup by age (MAX_RECORDING_AGE_HOURS) and size (MAX_RECORDINGS_GB)
 - `src/pages/api/cameras/scan.js` — TCP port scan to discover cameras on LAN
 - `src/components/CameraStream.js` — live view card with recording and PTZ controls
 - `src/components/CameraSetup.js` — camera registration form + scan results (stays mounted across tab switches)
 - `src/components/FilesViewer.js` — recordings/screenshots browser with disk space panel
+- `scripts/migrate-json-to-db.js` — migración one-time de cameras.json + events.json → SQLite
 
 ## Environment Variables (.env.local)
 
 ```
-APP_PASSWORD=           # HTTP Basic Auth password — OBLIGATORIO en producción (vacío = sin auth)
+APP_PASSWORD=                    # Contraseña para login — OBLIGATORIO en producción (vacío = sin auth)
 MAX_RECORDING_AGE_HOURS=72
 MAX_RECORDINGS_GB=10
 RECORDING_SEGMENT_MINUTES=30
+
+DATABASE_URL=file:./prisma/dev.db
+
+NEXTAUTH_URL=https://cam.jcsolutions.dev   # URL pública — cambiar si se mueve el dominio
+NEXTAUTH_SECRET=                           # openssl rand -base64 32
+ENCRYPTION_KEY=                            # openssl rand -hex 32 (para credenciales RTSP en DB)
 ```
 
 ## Detección de movimiento — Python + OpenCV
@@ -94,9 +108,43 @@ pm2 stop vigilancia
 
 ## Cloudflare Tunnel (acceso desde internet)
 
-Ver `scripts/setup-tunnel.sh` para los pasos de instalación.
+URL pública: `https://cam.jcsolutions.dev`
 El túnel expone `localhost:3000` como HTTPS público sin abrir puertos del router.
 Las cámaras IP **nunca** son accesibles desde internet — solo el tráfico HTTP de Next.js pasa por el túnel.
+
+**Setup inicial (ya realizado — no repetir):**
+```bash
+bash scripts/setup-tunnel.sh          # instala cloudflared, crea el túnel, genera config.yml
+cloudflared tunnel route dns vigilancia cam.jcsolutions.dev   # crea el CNAME en Cloudflare DNS
+```
+
+**Config del túnel**: `~/.cloudflared/config.yml`
+```yaml
+tunnel: 2764b939-5f48-4ab1-a9f6-e76d1d2168ee
+credentials-file: ~/.cloudflared/2764b939-5f48-4ab1-a9f6-e76d1d2168ee.json
+ingress:
+  - hostname: cam.jcsolutions.dev
+    service: http://localhost:3000
+  - service: http_status:404
+```
+
+El túnel arranca automáticamente con pm2 (proceso `tunnel` en `ecosystem.config.cjs`).
+
+**Diagnóstico:**
+```bash
+pm2 logs tunnel --lines 30    # ver estado de conexiones
+dig cam.jcsolutions.dev +short @1.1.1.1   # verificar DNS desde Cloudflare
+curl --resolve cam.jcsolutions.dev:443:104.21.52.128 https://cam.jcsolutions.dev   # test sin DNS local
+```
+
+## Auth — Single-user mode
+
+- `APP_PASSWORD` vacío → sin auth, acceso libre (modo dev local)
+- `APP_PASSWORD` seteado → NextAuth gate: requiere login en `/auth/login`
+- Registro en `/auth/register` (primera vez, crear cuenta)
+- `requireUserId()` siempre retorna `LOCAL_USER_ID='local'` — todos los datos bajo un solo usuario
+- El motion-detector accede al MJPEG via Basic Auth con `APP_PASSWORD` (bypass de sesión)
+- `/api/auth/*` está excluido del middleware para permitir login/register sin sesión
 
 ## Important Behaviors
 
