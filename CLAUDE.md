@@ -5,23 +5,29 @@ Next.js 15.5.3 (Pages Router), React 19, Tailwind CSS 4. Security camera dashboa
 ## Camera Hardware
 
 **Model**: Geotek dual-lens WiFi cameras (firmware V5.04.R02.000A07F3 / iCSee app)
-**Credentials**: `admin` / `admin123` (factory default for all Geotek units)
-**RTSP URL format**: `rtsp://admin:admin123@<ip>:554/live`
-**Network**: 192.168.68.x subnet
+**Credentials**: `jorge` / `jorge123` (cambiadas desde factory default admin/admin123 via iCSee)
+**RTSP URL format**: `rtsp://jorge:jorge123@<ip>:554/live`
+**Network**: 192.168.68.x subnet (IPs asignadas por DHCP — pueden cambiar si el router reinicia)
 
-Current cameras:
-- `cam103` → 192.168.68.103
+Current cameras (registradas en prisma/dev.db):
+- `cam103` → 192.168.68.105 (nombre en DB: cam103, IP actual: .105)
 - `cam106` → 192.168.68.106
+- `cam107` → 192.168.68.107
+
+> Las credenciales están cifradas con AES-256-GCM en la DB. Para editarlas usá la pestaña
+> Configuración de cada cámara en la UI, o directamente con la API PATCH /api/cameras/[id].
 
 ## Architecture
 
-- **Live view**: FFmpeg MJPEG decode → multipart HTTP stream (`/api/cameras/[id]/mjpeg`)
-- **Recording**: FFmpeg direct RTSP copy (`-c:v copy`) to MP4 — zero CPU, original quality
-- **Two independent FFmpeg processes per camera**: one for viewer, one for recorder
+- **Live view**: FFmpeg RTSP → MJPEG → WebSocket binary frames al browser (sin base64, baja latencia)
+- **Recording**: FFmpeg direct RTSP copy (`-c:v copy`) to MP4 — zero CPU, calidad original
+- **Two independent FFmpeg processes per camera**: uno para viewer, uno para recorder
+- **Motion detection**: Python subprocess con MOG2 + YOLO11 — lee frames del viewer via MJPEG interno
 - **Database**: Prisma 7 + SQLite (`prisma/dev.db`) via `@prisma/adapter-better-sqlite3`
 - **Auth**: NextAuth v4 con CredentialsProvider + JWT sessions (`src/lib/auth.js`)
 - **Single-user mode**: NextAuth es solo el gate de login — todos los datos viven bajo `LOCAL_USER_ID='local'`
 - **Internet access**: Cloudflare Tunnel → `https://cam.jcsolutions.dev`
+- **Middleware bypass**: requests desde localhost (127.0.0.1) omiten auth — necesario para que Python/cv2 acceda al MJPEG interno
 
 ## Key Files
 
@@ -83,37 +89,62 @@ chmod +x scripts/cleanup-orphans.sh   # solo la primera vez
 bash scripts/cleanup-orphans.sh
 ```
 
-## Deployment con pm2
+## Instalación en una compu nueva
 
-Arrancar en producción (instalación nueva o servidor nuevo):
+### Requisitos previos (manuales — el script no puede hacer esto)
+
+1. **Copiar `.env.local`** desde la Mac original a la raíz del proyecto
+2. **Copiar `prisma/dev.db`** (opcional — si no se copia, las cámaras se registran de nuevo desde la UI)
+
+### Instalación con script (recomendado)
+
 ```bash
-npm install
-npx prisma db push          # ← OBLIGATORIO: crea/actualiza el schema en la DB
-npm run build
-pm2 start ecosystem.config.cjs
+git clone https://github.com/jorgecardozo/camera.git
+cd camera
+# Pegar .env.local y opcionalmente prisma/dev.db acá
+bash scripts/setup.sh
+```
+
+El script hace todo automáticamente:
+- Verifica e instala Node.js, Python3, FFmpeg, pm2 (via Homebrew en Mac, apt en Linux/RPi)
+- `npm install` + `npx prisma db push`
+- Crea `.venv` e instala OpenCV + YOLO
+- `npm run build`
+- Arranca con pm2
+
+Después del script, **una sola vez**:
+```bash
+pm2 startup    # imprime un comando → copiarlo y ejecutarlo
 pm2 save
 ```
 
-Actualizar en servidor existente (después de un `git pull`):
+### Actualizar en servidor existente
+
 ```bash
-npx prisma db push          # solo si hubo cambios en prisma/schema.prisma
+git pull
+npx prisma db push    # solo si cambió prisma/schema.prisma
 npm run build
 pm2 restart vigilancia
 ```
 
-Registrar arranque automático al encender el servidor (solo una vez):
+### Comandos pm2 útiles
+
 ```bash
-pm2 startup          # copia y ejecuta el comando que imprime
-pm2 save
+pm2 list                  # ver estado de todos los procesos
+pm2 logs vigilancia       # ver logs en vivo
+pm2 restart vigilancia    # reiniciar
+pm2 stop vigilancia       # detener
 ```
 
-Comandos útiles:
-```bash
-pm2 list             # ver estado
-pm2 logs vigilancia  # ver logs en vivo
-pm2 restart vigilancia
-pm2 stop vigilancia
-```
+### Raspberry Pi — consideraciones especiales
+
+- Usar RPi 5 con 8GB RAM para 4-5 cámaras con YOLO
+- El `ffmpeg-static` de npm **no funciona en ARM64** — agregar al `.env.local`:
+  ```
+  FFMPEG_PATH=/usr/bin/ffmpeg
+  ```
+- El script detecta RPi automáticamente e instala `torch` CPU-only
+- Ver plan completo: `docs/plans/2026-04-27-001-feat-raspberry-pi-deployment-plan.md`
 
 ## Cloudflare Tunnel (acceso desde internet)
 
@@ -161,8 +192,13 @@ curl --resolve cam.jcsolutions.dev:443:104.21.52.128 https://cam.jcsolutions.dev
 - The **cameras tab unmounts** on switch to stop MJPEG FFmpeg processes
 - `buildRtspUrl()` omits credentials from URL when both username and password are empty
 - Recorder restarts automatically after each segment when `continuousRecord: true`
+- **Manual recording persists across restarts**: `manualRecording` flag se guarda en DB; al arrancar el servidor, `_initContinuous()` reanuda las grabaciones manuales pendientes
+- Si FFmpeg crashea durante una grabación manual, se reinicia automáticamente (1s delay)
 - `forceStopAll(cameraId)` kills both viewer and recorder unconditionally (used on delete)
 - Retention cleanup runs on server start and every hour
+- **Fullscreen view**: botón ⛶ en cada cámara — overlay con bounding boxes correctamente posicionados sobre la imagen real (no el contenedor con letterbox)
+- **Bounding boxes**: siempre relativos al `<img>` renderizado, no al contenedor — evita el desplazamiento por object-contain
+- PATCH `/api/cameras/[id]` acepta `ip`, `port`, `httpPort`, `rtspPath`, `username`, `password` — al cambiar parámetros de conexión, mata y reinicia el stream automáticamente
 
 ## PTZ — Motor físico confirmado, credenciales DVRIP desconocidas
 
