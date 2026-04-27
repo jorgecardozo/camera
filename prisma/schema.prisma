@@ -33,6 +33,7 @@ model Camera {
   rtspPath             String   @default("/live")
   credentialsEncrypted String   @default("")
   continuousRecord     Boolean  @default(false)
+  manualRecording      Boolean  @default(false)
   motionDetect         Boolean  @default(false)
   motionSensitivity    Float    @default(0.12)
   telegramBotToken     String   @default("")

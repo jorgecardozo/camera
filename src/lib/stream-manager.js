@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { cameraManager } from './camera-utils';
+import { prisma } from './db.js';
 import ffmpegStatic from 'ffmpeg-static';
 import './log-buffer'; // activate console interception early
 
@@ -20,7 +21,7 @@ class StreamManager {
 
     async _initContinuous() {
         for (const camera of cameraManager.getAllCameras()) {
-            if (camera.continuousRecord || camera.isRecording) {
+            if (camera.continuousRecord || camera.manualRecording) {
                 this.startRecorder(camera.id, camera);
             }
         }
@@ -293,6 +294,9 @@ class StreamManager {
 
             if (camera.continuousRecord) {
                 setTimeout(() => this.startRecorder(cameraId, camera), 500);
+            } else if (!isMotion && cam?.manualRecording) {
+                // FFmpeg crashed mid manual recording — restart it
+                setTimeout(() => this.startRecorder(cameraId, cam), 1000);
             }
         });
 
@@ -304,6 +308,11 @@ class StreamManager {
 
         const cam = cameraManager.getCamera(cameraId);
         if (cam) cam.isRecording = true;
+
+        // Persist manual recording so it survives server restarts
+        if (!isMotion && !camera.continuousRecord) {
+            cameraManager.updateCamera(cameraId, { manualRecording: true }).catch(() => {});
+        }
 
         return { status: 'started', filename };
     }
@@ -321,7 +330,8 @@ class StreamManager {
         entry.process.kill('SIGTERM');
         this.recorders.delete(cameraId);
 
-        if (cam) cam.isRecording = false;
+        if (cam) { cam.isRecording = false; cam.manualRecording = false; }
+        cameraManager.updateCamera(cameraId, { manualRecording: false }).catch(() => {});
         return { status: 'stopped' };
     }
 

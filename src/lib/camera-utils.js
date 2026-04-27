@@ -28,6 +28,7 @@ function toRuntimeCamera(dbCam) {
         rtspUrl: buildRtspUrl({ ip: dbCam.ip, port: dbCam.port, rtspPath: dbCam.rtspPath, username, password }),
         httpUrl: `http://${dbCam.ip}:${dbCam.httpPort}`,
         continuousRecord: dbCam.continuousRecord,
+        manualRecording: dbCam.manualRecording,
         motionDetect: dbCam.motionDetect,
         motionSensitivity: dbCam.motionSensitivity,
         telegramBotToken: dbCam.telegramBotToken,
