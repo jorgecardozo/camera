@@ -85,11 +85,20 @@ bash scripts/cleanup-orphans.sh
 
 ## Deployment con pm2
 
-Arrancar en producción:
+Arrancar en producción (instalación nueva o servidor nuevo):
 ```bash
+npm install
+npx prisma db push          # ← OBLIGATORIO: crea/actualiza el schema en la DB
 npm run build
 pm2 start ecosystem.config.cjs
 pm2 save
+```
+
+Actualizar en servidor existente (después de un `git pull`):
+```bash
+npx prisma db push          # solo si hubo cambios en prisma/schema.prisma
+npm run build
+pm2 restart vigilancia
 ```
 
 Registrar arranque automático al encender el servidor (solo una vez):
