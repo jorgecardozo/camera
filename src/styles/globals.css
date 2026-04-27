@@ -16,3 +16,15 @@ body {
 input, select, textarea {
   font-size: 16px;
 }
+
+/* Auth pages — light/dark aware, independent of app shell */
+.auth-bg {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+@media (prefers-color-scheme: dark) {
+  .auth-bg {
+    background: #020617;
+    color: #f1f5f9;
+  }
+}
