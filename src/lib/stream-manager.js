@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { cameraManager } from './camera-utils';
 import ffmpegStatic from 'ffmpeg-static';
+import './log-buffer'; // activate console interception early
 
 const SEGMENT_MS = parseInt(process.env.RECORDING_SEGMENT_MINUTES || '30', 10) * 60_000;
 const FFMPEG = process.env.FFMPEG_PATH || ffmpegStatic || 'ffmpeg';

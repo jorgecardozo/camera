@@ -4,6 +4,7 @@ import { signOut } from 'next-auth/react';
 import CameraStream from '../components/CameraStream';
 import CameraSetup from '../components/CameraSetup';
 import FilesViewer from '../components/FilesViewer';
+import LogViewer from '../components/LogViewer';
 import { Shield, Video, Settings, Files, LogOut } from 'lucide-react';
 
 type Camera = {
@@ -144,12 +145,13 @@ export default function Home() {
             )
           )}
 
-          <div className={activeTab === 'setup' ? '' : 'hidden'}>
+          <div className={activeTab === 'setup' ? 'space-y-4' : 'hidden'}>
             <CameraSetup
               cameras={cameras}
               autoScan={cameras.length === 0}
               onCameraAdded={() => { fetchCameras(); setActiveTab('cameras'); }}
             />
+            <LogViewer />
           </div>
 
           {activeTab === 'files' && <FilesViewer cameras={cameras} />}
