@@ -56,6 +56,11 @@ cameras.json
 events.json
 vigilancia.db
 
+# Prisma database (runtime data — do not commit)
+prisma/*.db
+prisma/*.db-shm
+prisma/*.db-wal
+
 # Python
 .venv/
 __pycache__/
