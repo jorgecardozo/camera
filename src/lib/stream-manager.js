@@ -35,6 +35,7 @@ class StreamManager {
     // ─── Viewer (MJPEG) ─────────────────────────────────────────────────────
 
     _spawn(state) {
+        console.log(`[stream:${state.cameraId}] Arrancando FFmpeg viewer → ${state.camera.rtspUrl.replace(/:\/\/[^@]+@/, '://**@')}`);
         const ffmpeg = spawn(FFMPEG, [
             '-fflags', 'nobuffer',
             '-flags', 'low_delay',
@@ -107,7 +108,17 @@ class StreamManager {
             if (buf.length > 8 * 1024 * 1024) buf = Buffer.alloc(0);
         });
 
-        ffmpeg.stderr.on('data', () => {});
+        // Capture stderr to log FFmpeg errors (connection drops, codec issues, etc.)
+        let stderrBuf = '';
+        ffmpeg.stderr.on('data', (chunk) => {
+            stderrBuf += chunk.toString();
+            // Emit line by line to avoid partial lines in logs
+            const lines = stderrBuf.split('\n');
+            stderrBuf = lines.pop(); // keep incomplete last line
+            for (const line of lines) {
+                if (line.trim()) console.log(`[ffmpeg:${state.cameraId}] ${line}`);
+            }
+        });
 
         ffmpeg.on('close', (code, signal) => {
             if (state.ffmpegProcess !== ffmpeg) return; // stale process
@@ -115,12 +126,14 @@ class StreamManager {
             buf = Buffer.alloc(0);
 
             const isSignalKill = signal != null; // killed intentionally
+            console.log(`[stream:${state.cameraId}] FFmpeg cerrado — code=${code} signal=${signal} clients=${state.clients.size} failCount=${state.failCount || 0}`);
 
             if (!isSignalKill && code !== 0) {
                 state.failCount = (state.failCount || 0) + 1;
                 if (state.failCount >= 3) {
                     const cam = cameraManager.getCamera(state.cameraId);
                     if (cam) cam.isOnline = false;
+                    console.log(`[stream:${state.cameraId}] Cámara marcada offline (${state.failCount} fallos consecutivos)`);
                 }
             }
 
@@ -128,12 +141,14 @@ class StreamManager {
                 const backoff = isSignalKill
                     ? 2000
                     : Math.min(60000, 5000 * Math.pow(2, Math.max(0, (state.failCount || 1) - 1)));
+                console.log(`[stream:${state.cameraId}] Reintentando en ${backoff}ms (${state.clients.size} cliente/s esperando)`);
                 state.retryTimer = setTimeout(() => {
                     state.retryTimer = null;
-                    state.markedOnline = false; // reset so next connection re-marks online
+                    state.markedOnline = false;
                     if (state.clients.size > 0) this._spawn(state);
                 }, backoff);
             } else {
+                console.log(`[stream:${state.cameraId}] Sin clientes, stream eliminado`);
                 this.streams.delete(state.cameraId);
             }
         });
@@ -158,11 +173,14 @@ class StreamManager {
     addClient(cameraId, camera, res) {
         const state = this._getOrCreate(cameraId, camera);
         state.clients.add(res);
+        console.log(`[stream:${cameraId}] Cliente conectado (total: ${state.clients.size})`);
         res.on('close', () => {
             state.clients.delete(res);
+            console.log(`[stream:${cameraId}] Cliente desconectado (quedan: ${state.clients.size})`);
             if (state.clients.size === 0) {
                 setTimeout(() => {
                     if (state.clients.size === 0) {
+                        console.log(`[stream:${cameraId}] Sin clientes por 15s → matando FFmpeg`);
                         if (state.retryTimer) { clearTimeout(state.retryTimer); state.retryTimer = null; }
                         state.ffmpegProcess?.kill('SIGTERM');
                         this.streams.delete(cameraId);
