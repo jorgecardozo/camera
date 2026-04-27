@@ -1,7 +1,10 @@
 import { cameraManager } from '../../../lib/camera-utils';
 import { requireUserId } from '../../../lib/session';
+import { initWsServer } from '../../../lib/ws-server';
 
 export default async function handler(req, res) {
+    initWsServer(res.socket.server);
+
     const userId = await requireUserId(req, res);
     if (!userId) return;
 

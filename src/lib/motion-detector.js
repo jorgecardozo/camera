@@ -23,7 +23,8 @@ function resolveConfidence(sensitivity) {
 function buildMjpegUrl(cameraId) {
     const port = process.env.PORT || 3000;
     const pass  = process.env.APP_PASSWORD || '';
-    const auth  = pass ? `:${encodeURIComponent(pass)}@` : '';
+    // cv2.VideoCapture requires a non-empty username to send Basic Auth headers
+    const auth  = pass ? `stream:${encodeURIComponent(pass)}@` : '';
     return `http://${auth}localhost:${port}/api/cameras/${cameraId}/mjpeg`;
 }
 
@@ -67,7 +68,10 @@ class MotionDetector {
                 }
             });
 
-            proc.stderr.on('data', () => {});
+            proc.stderr.on('data', (chunk) => {
+                const lines = chunk.toString().split('\n').filter(l => l.trim());
+                for (const line of lines) console.error(`[motion:${cameraId}] ${line}`);
+            });
 
             proc.on('error', (err) => {
                 if (err.code === 'ENOENT') {

@@ -20,9 +20,13 @@ export default async function handler(req, res) {
         res.status(200).json({ message: 'Cámara eliminada' });
 
     } else if (req.method === 'PATCH') {
-        const ALLOWED = ['telegramBotToken', 'telegramChatId', 'telegramEnabled', 'notifyObjects', 'name', 'motionDetect', 'motionSensitivity', 'continuousRecord'];
+        const ALLOWED = ['telegramBotToken', 'telegramChatId', 'telegramEnabled', 'notifyObjects', 'name', 'motionDetect', 'motionSensitivity', 'continuousRecord', 'ip', 'port', 'httpPort', 'rtspPath', 'username', 'password'];
         const updates = Object.fromEntries(Object.entries(req.body).filter(([k]) => ALLOWED.includes(k)));
         await cameraManager.updateCamera(id, updates);
+
+        const connectionChanged = ['ip', 'port', 'rtspPath', 'username', 'password'].some(k => k in updates);
+        if (connectionChanged) streamManager.forceStopAll(id);
+
         res.json({ ok: true });
 
     } else {

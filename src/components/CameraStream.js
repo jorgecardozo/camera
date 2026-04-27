@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Camera, Video, Square, Trash2, Activity, Settings, Bell, BellOff } from 'lucide-react';
+import { Camera, Video, Square, Trash2, Activity, Settings, Bell, BellOff, Maximize2, X } from 'lucide-react';
 
 const VEHICLE_LABELS = new Set(['Auto', 'Camión', 'Colectivo', 'Moto', 'Bici', 'Barco', 'Avión']);
 const ANIMAL_LABELS  = new Set(['Perro', 'Gato', 'Pájaro', 'Caballo']);
@@ -20,7 +20,53 @@ export default function CameraStream({ camera, onUpdate }) {
     const [tgToken, setTgToken] = useState(camera.telegramBotToken || '');
     const [tgChatId, setTgChatId] = useState(camera.telegramChatId || '');
     const [tgEnabled, setTgEnabled] = useState(camera.telegramEnabled ?? false);
+    const [camIp, setCamIp] = useState(camera.ip || '');
+    const [camUser, setCamUser] = useState('');
+    const [camPass, setCamPass] = useState('');
+    const [isFullscreen, setIsFullscreen] = useState(false);
+
+    useEffect(() => {
+        if (!isFullscreen) return;
+        const onKey = (e) => { if (e.key === 'Escape') setIsFullscreen(false); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [isFullscreen]);
     const boxInterval = useRef(null);
+    const imgRef = useRef(null);
+    const fullImgRef = useRef(null);
+
+    useEffect(() => {
+        let ws;
+        let alive = true;
+        let prevUrl = null;
+
+        const connect = () => {
+            if (!alive) return;
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${proto}//${window.location.host}/api/cameras/${camera.id}/ws`);
+            ws.binaryType = 'blob';
+
+            ws.onmessage = (e) => {
+                if (!alive) return;
+                const url = URL.createObjectURL(e.data);
+                if (imgRef.current) imgRef.current.src = url;
+                if (fullImgRef.current) fullImgRef.current.src = url;
+                if (prevUrl) URL.revokeObjectURL(prevUrl);
+                prevUrl = url;
+            };
+
+            ws.onclose = () => { if (alive) setTimeout(connect, 2000); };
+            ws.onerror = () => ws.close();
+        };
+
+        connect();
+
+        return () => {
+            alive = false;
+            ws?.close();
+            if (prevUrl) URL.revokeObjectURL(prevUrl);
+        };
+    }, [camera.id]);
 
     useEffect(() => {
         if (!camera.motionActive) { setBoxes([]); return; }
@@ -82,17 +128,27 @@ export default function CameraStream({ camera, onUpdate }) {
     const handleSaveSettings = async () => {
         setIsLoading(true);
         try {
+            const body = {
+                telegramBotToken: tgToken.trim(),
+                telegramChatId: tgChatId.trim(),
+                telegramEnabled: tgEnabled,
+            };
+            if (camIp.trim() && camIp.trim() !== camera.ip) body.ip = camIp.trim();
+            if (camUser.trim()) body.username = camUser.trim();
+            if (camPass.trim()) body.password = camPass.trim();
+
             const res = await fetch(`/api/cameras/${camera.id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    telegramBotToken: tgToken.trim(),
-                    telegramChatId: tgChatId.trim(),
-                    telegramEnabled: tgEnabled,
-                }),
+                body: JSON.stringify(body),
             });
             notify(res.ok ? 'Configuración guardada' : 'Error al guardar');
-            if (res.ok) setShowSettings(false);
+            if (res.ok) {
+                setCamUser('');
+                setCamPass('');
+                setShowSettings(false);
+                onUpdate?.();
+            }
         } catch (e) { notify(`Error: ${e.message}`); }
         finally { setIsLoading(false); }
     };
@@ -119,15 +175,14 @@ export default function CameraStream({ camera, onUpdate }) {
         finally { setIsLoading(false); }
     };
 
-    return (
+    return <>
         <div className="bg-slate-800/80 rounded-2xl overflow-hidden border border-slate-700/60 flex flex-col shadow-lg">
             {/* Video */}
             <div className={`relative aspect-video bg-black ${camera.motionActive ? 'ring-2 ring-orange-500 ring-inset' : ''}`}>
                 <img
-                    src={`/api/cameras/${camera.id}/mjpeg`}
+                    ref={imgRef}
                     alt={camera.name}
                     className="w-full h-full object-cover"
-                    onError={() => notify('Sin señal — verificá la conexión')}
                 />
 
                 {/* Bounding boxes */}
@@ -177,6 +232,15 @@ export default function CameraStream({ camera, onUpdate }) {
                         </span>
                     </div>
                 )}
+
+                {/* Fullscreen button */}
+                <button
+                    onClick={() => setIsFullscreen(true)}
+                    className="absolute bottom-10 right-2.5 w-8 h-8 flex items-center justify-center bg-black/40 hover:bg-black/70 text-white/70 hover:text-white rounded-lg backdrop-blur-sm transition-colors z-10 cursor-pointer"
+                    title="Pantalla completa"
+                >
+                    <Maximize2 size={14} />
+                </button>
 
                 {/* Bottom overlay */}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 pt-6 pb-2.5">
@@ -308,6 +372,30 @@ export default function CameraStream({ camera, onUpdate }) {
             {/* Settings panel */}
             {showSettings && (
                 <div className="px-4 py-4 bg-slate-900/80 border-t border-slate-700/60 space-y-3">
+                    <p className="text-sm font-medium text-slate-300">Conexión</p>
+                    <input
+                        type="text"
+                        placeholder={`IP actual: ${camera.ip}`}
+                        value={camIp}
+                        onChange={e => setCamIp(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-xl px-3 py-2.5 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50"
+                    />
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            placeholder="Nuevo usuario"
+                            value={camUser}
+                            onChange={e => setCamUser(e.target.value)}
+                            className="flex-1 bg-slate-800 border border-slate-600 text-slate-200 rounded-xl px-3 py-2.5 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50"
+                        />
+                        <input
+                            type="password"
+                            placeholder="Nueva contraseña"
+                            value={camPass}
+                            onChange={e => setCamPass(e.target.value)}
+                            className="flex-1 bg-slate-800 border border-slate-600 text-slate-200 rounded-xl px-3 py-2.5 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50"
+                        />
+                    </div>
                     <div className="flex items-center justify-between">
                         <p className="text-sm font-medium text-slate-300">Telegram</p>
                         <button
@@ -375,5 +463,84 @@ export default function CameraStream({ camera, onUpdate }) {
                 </div>
             )}
         </div>
-    );
+
+        {/* Fullscreen overlay */}
+        {isFullscreen && (
+            <div
+                className="fixed inset-0 z-50 bg-black flex items-center justify-center"
+                style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+            >
+                {/* Inner wrapper sizes itself to the rendered image — boxes are relative to this */}
+                <div className="relative" style={{ maxWidth: '100%', maxHeight: '100%' }}>
+                    <img
+                        ref={fullImgRef}
+                        alt={camera.name}
+                        style={{ display: 'block', maxWidth: '100vw', maxHeight: '100dvh', width: 'auto', height: 'auto' }}
+                    />
+
+                    {/* Bounding boxes — positioned relative to image bounds */}
+                    {boxes.length > 0 && <>
+                        <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                            {boxes.map((box, i) => (
+                                <rect key={i}
+                                    x={`${box.x * 100}%`} y={`${box.y * 100}%`}
+                                    width={`${box.w * 100}%`} height={`${box.h * 100}%`}
+                                    fill="none" stroke={boxColor(box.label)} strokeWidth="2" rx="2"
+                                />
+                            ))}
+                        </svg>
+                        {boxes.map((box, i) => (
+                            <div key={i}
+                                className="absolute text-xs font-bold px-1 leading-5 rounded-sm whitespace-nowrap"
+                                style={{
+                                    left: `${box.x * 100}%`,
+                                    top: box.y > 0.07
+                                        ? `calc(${box.y * 100}% - 20px)`
+                                        : `calc(${box.y * 100}% + 2px)`,
+                                    backgroundColor: boxColor(box.label),
+                                    color: '#fff',
+                                }}
+                            >
+                                {box.label}{box.conf ? ` ${Math.round(box.conf * 100)}%` : ''}
+                            </div>
+                        ))}
+                    </>}
+
+                    {/* Motion badge */}
+                    {camera.motionActive && (
+                        <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-orange-500/90 backdrop-blur-sm rounded-lg px-2.5 py-1">
+                            <Activity size={11} className="text-white animate-pulse" />
+                            <span className="text-white text-xs font-bold tracking-wider">MOVIMIENTO</span>
+                        </div>
+                    )}
+
+                    {/* Bottom info */}
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 pt-6 pb-2">
+                        <div className="flex items-end justify-between">
+                            <div>
+                                <p className="text-white font-semibold text-sm leading-tight">{camera.name}</p>
+                                <p className="text-slate-400 text-xs">{camera.ip}</p>
+                            </div>
+                            {camera.isOnline !== false && (
+                                <div className="flex items-center gap-1.5">
+                                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                                    <span className="text-slate-300 text-xs">EN VIVO</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Close button — fixed to screen corner, outside the image wrapper */}
+                <button
+                    onClick={() => setIsFullscreen(false)}
+                    className="absolute top-3 right-3 w-10 h-10 flex items-center justify-center bg-black/60 hover:bg-black/80 text-white rounded-xl backdrop-blur-sm transition-colors"
+                    style={{ marginTop: 'env(safe-area-inset-top)' }}
+                >
+                    <X size={20} />
+                </button>
+            </div>
+        )}
+    </>;
 }
+

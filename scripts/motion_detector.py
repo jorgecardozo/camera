@@ -142,8 +142,8 @@ def main():
         sys.exit(1)
 
     mog2 = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=16, detectShadows=False)
-    MIN_CONTOUR_AREA   = 1500   # px² — ignore tiny lighting changes
-    PERIODIC_FRAMES    = 150    # full-frame YOLO every ~15 s (at ~10 fps) to catch stationary objects
+    MIN_CONTOUR_AREA   = 800    # px² — catch smaller/slower animals
+    PERIODIC_FRAMES    = 50     # full-frame YOLO every ~5 s to catch stationary animals
     frame_count        = 0
 
     while running:
@@ -163,7 +163,7 @@ def main():
             # No motion — periodic full-frame scan to catch stationary objects
             if frame_count % PERIODIC_FRAMES != 0:
                 continue
-            results = model(frame, imgsz=480, conf=conf_thres, verbose=False)[0]
+            results = model(frame, imgsz=640, conf=conf_thres, verbose=False)[0]
             boxes   = parse_full(results, model, w, h)
             if boxes:
                 emit(boxes, frame, w, h)
@@ -181,8 +181,8 @@ def main():
         crop  = frame[y1:y2, x1:x2]
 
         # ── YOLO on crop + full frame (catches objects outside motion zone) ────
-        r_crop = model(crop,  imgsz=480, conf=conf_thres, verbose=False)[0]
-        r_full = model(frame, imgsz=480, conf=conf_thres, verbose=False)[0]
+        r_crop = model(crop,  imgsz=640, conf=conf_thres, verbose=False)[0]
+        r_full = model(frame, imgsz=640, conf=conf_thres, verbose=False)[0]
 
         crop_boxes = parse_crop(r_crop, model, x1, y1, x2, y2, w, h)
         full_boxes = parse_full(r_full, model, w, h)

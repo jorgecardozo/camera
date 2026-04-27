@@ -11,8 +11,8 @@ const FFMPEG = process.env.FFMPEG_PATH || ffmpegStatic || 'ffmpeg';
 
 class StreamManager {
     constructor() {
-        this.streams   = new Map(); // MJPEG viewer streams  (one per camera)
-        this.recorders = new Map(); // Direct RTSP recorders (one per camera)
+        this.streams   = new Map(); // viewer streams  (one per camera)
+        this.recorders = new Map(); // direct RTSP recorders (one per camera)
         setImmediate(() => this._initContinuous());
     }
 
@@ -33,7 +33,24 @@ class StreamManager {
         }
     }
 
-    // ─── Viewer (MJPEG) ─────────────────────────────────────────────────────
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    _hasViewers(state) {
+        return state.clients.size > 0 || state.sseClients.size > 0 || state.wsClients.size > 0;
+    }
+
+    _scheduleKill(state) {
+        setTimeout(() => {
+            if (!this._hasViewers(state)) {
+                console.log(`[stream:${state.cameraId}] Sin clientes por 15s → matando FFmpeg`);
+                if (state.retryTimer) { clearTimeout(state.retryTimer); state.retryTimer = null; }
+                state.ffmpegProcess?.kill('SIGTERM');
+                this.streams.delete(state.cameraId);
+            }
+        }, 15000);
+    }
+
+    // ─── Viewer (MJPEG + SSE + WebSocket) ───────────────────────────────────
 
     _spawn(state) {
         console.log(`[stream:${state.cameraId}] Arrancando FFmpeg viewer → ${state.camera.rtspUrl.replace(/:\/\/[^@]+@/, '://**@')}`);
@@ -47,9 +64,9 @@ class StreamManager {
             '-i', state.camera.rtspUrl,
             '-f', 'mpjpeg',
             '-vcodec', 'mjpeg',
-            '-q:v', '3',
-            '-r', '25',
-            '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+            '-q:v', '5',
+            '-r', '15',
+            '-vf', "scale=w='min(640,iw)':h=-2",
             'pipe:1',
         ]);
 
@@ -59,9 +76,7 @@ class StreamManager {
         ffmpeg.stdout.on('data', (chunk) => {
             buf = Buffer.concat([buf, chunk]);
 
-            // mpjpeg format includes Content-Length headers so we extract
-            // exactly the right number of bytes per frame — no SOI/EOI scanning
-            // that can mis-assemble frames from partial network data.
+            // mpjpeg includes Content-Length headers — extract exact bytes per frame.
             while (true) {
                 const hEnd = buf.indexOf('\r\n\r\n');
                 if (hEnd === -1) break;
@@ -70,21 +85,19 @@ class StreamManager {
                 const clMatch = headerStr.match(/Content-Length:\s*(\d+)/i);
 
                 if (!clMatch) {
-                    // Initial multipart Content-Type line — skip it.
                     buf = buf.slice(hEnd + 4);
                     continue;
                 }
 
                 const frameSize = parseInt(clMatch[1], 10);
                 const dataStart = hEnd + 4;
-                if (buf.length < dataStart + frameSize) break; // wait for more data
+                if (buf.length < dataStart + frameSize) break;
 
                 const frame = buf.slice(dataStart, dataStart + frameSize);
                 buf = buf.slice(dataStart + frameSize);
 
-                state.lastFrame = frame; // kept for motion-triggered screenshots
+                state.lastFrame = frame;
 
-                // First frame received — mark camera online and reset failure count.
                 if (!state.markedOnline) {
                     state.markedOnline = true;
                     state.failCount = 0;
@@ -92,16 +105,42 @@ class StreamManager {
                     if (cam) cam.isOnline = true;
                 }
 
-                const header = Buffer.from(
-                    `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`
-                );
-                for (const res of state.clients) {
-                    try {
-                        res.write(header);
-                        res.write(frame);
-                        res.write(Buffer.from('\r\n'));
-                    } catch (_) {
-                        state.clients.delete(res);
+                // MJPEG multipart clients
+                if (state.clients.size > 0) {
+                    const mjpegHeader = Buffer.from(
+                        `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`
+                    );
+                    for (const res of state.clients) {
+                        try {
+                            res.write(mjpegHeader);
+                            res.write(frame);
+                            res.write(Buffer.from('\r\n'));
+                        } catch (_) {
+                            state.clients.delete(res);
+                        }
+                    }
+                }
+
+                // SSE clients — base64-encoded JPEG
+                if (state.sseClients.size > 0) {
+                    const b64 = frame.toString('base64');
+                    for (const res of state.sseClients) {
+                        try {
+                            res.write(`data: ${b64}\n\n`);
+                        } catch (_) {
+                            state.sseClients.delete(res);
+                        }
+                    }
+                }
+
+                // WebSocket clients — raw binary JPEG (no base64 overhead)
+                if (state.wsClients.size > 0) {
+                    for (const ws of state.wsClients) {
+                        if (ws.readyState === 1 /* OPEN */) {
+                            try { ws.send(frame); } catch (_) { state.wsClients.delete(ws); }
+                        } else if (ws.readyState > 1 /* CLOSING/CLOSED */) {
+                            state.wsClients.delete(ws);
+                        }
                     }
                 }
             }
@@ -109,25 +148,23 @@ class StreamManager {
             if (buf.length > 8 * 1024 * 1024) buf = Buffer.alloc(0);
         });
 
-        // Capture stderr to log FFmpeg errors (connection drops, codec issues, etc.)
         let stderrBuf = '';
         ffmpeg.stderr.on('data', (chunk) => {
             stderrBuf += chunk.toString();
-            // Emit line by line to avoid partial lines in logs
             const lines = stderrBuf.split('\n');
-            stderrBuf = lines.pop(); // keep incomplete last line
+            stderrBuf = lines.pop();
             for (const line of lines) {
                 if (line.trim()) console.log(`[ffmpeg:${state.cameraId}] ${line}`);
             }
         });
 
         ffmpeg.on('close', (code, signal) => {
-            if (state.ffmpegProcess !== ffmpeg) return; // stale process
+            if (state.ffmpegProcess !== ffmpeg) return;
             state.ffmpegProcess = null;
             buf = Buffer.alloc(0);
 
-            const isSignalKill = signal != null; // killed intentionally
-            console.log(`[stream:${state.cameraId}] FFmpeg cerrado — code=${code} signal=${signal} clients=${state.clients.size} failCount=${state.failCount || 0}`);
+            const isSignalKill = signal != null;
+            console.log(`[stream:${state.cameraId}] FFmpeg cerrado — code=${code} signal=${signal} clients=${state.clients.size} sse=${state.sseClients.size} ws=${state.wsClients.size} failCount=${state.failCount || 0}`);
 
             if (!isSignalKill && code !== 0) {
                 state.failCount = (state.failCount || 0) + 1;
@@ -138,15 +175,15 @@ class StreamManager {
                 }
             }
 
-            if (state.clients.size > 0) {
+            if (this._hasViewers(state)) {
                 const backoff = isSignalKill
                     ? 2000
                     : Math.min(60000, 5000 * Math.pow(2, Math.max(0, (state.failCount || 1) - 1)));
-                console.log(`[stream:${state.cameraId}] Reintentando en ${backoff}ms (${state.clients.size} cliente/s esperando)`);
+                console.log(`[stream:${state.cameraId}] Reintentando en ${backoff}ms`);
                 state.retryTimer = setTimeout(() => {
                     state.retryTimer = null;
                     state.markedOnline = false;
-                    if (state.clients.size > 0) this._spawn(state);
+                    if (this._hasViewers(state)) this._spawn(state);
                 }, backoff);
             } else {
                 console.log(`[stream:${state.cameraId}] Sin clientes, stream eliminado`);
@@ -161,10 +198,14 @@ class StreamManager {
             cameraId,
             camera,
             ffmpegProcess: null,
-            clients: new Set(),
+            clients:    new Set(), // MJPEG long-poll responses
+            sseClients: new Set(), // SSE responses
+            wsClients:  new Set(), // WebSocket connections
             failCount: 0,
             retryTimer: null,
             markedOnline: false,
+            frameAnchor: null,
+            frameAnchorTimer: null,
         };
         this.streams.set(cameraId, state);
         this._spawn(state);
@@ -174,20 +215,33 @@ class StreamManager {
     addClient(cameraId, camera, res) {
         const state = this._getOrCreate(cameraId, camera);
         state.clients.add(res);
-        console.log(`[stream:${cameraId}] Cliente conectado (total: ${state.clients.size})`);
+        console.log(`[stream:${cameraId}] MJPEG cliente conectado (total: ${state.clients.size})`);
         res.on('close', () => {
             state.clients.delete(res);
-            console.log(`[stream:${cameraId}] Cliente desconectado (quedan: ${state.clients.size})`);
-            if (state.clients.size === 0) {
-                setTimeout(() => {
-                    if (state.clients.size === 0) {
-                        console.log(`[stream:${cameraId}] Sin clientes por 15s → matando FFmpeg`);
-                        if (state.retryTimer) { clearTimeout(state.retryTimer); state.retryTimer = null; }
-                        state.ffmpegProcess?.kill('SIGTERM');
-                        this.streams.delete(cameraId);
-                    }
-                }, 15000);
-            }
+            console.log(`[stream:${cameraId}] MJPEG cliente desconectado (quedan: ${state.clients.size})`);
+            if (!this._hasViewers(state)) this._scheduleKill(state);
+        });
+    }
+
+    addSseClient(cameraId, camera, res) {
+        const state = this._getOrCreate(cameraId, camera);
+        state.sseClients.add(res);
+        console.log(`[stream:${cameraId}] SSE cliente conectado (total: ${state.sseClients.size})`);
+        res.on('close', () => {
+            state.sseClients.delete(res);
+            console.log(`[stream:${cameraId}] SSE cliente desconectado (quedan: ${state.sseClients.size})`);
+            if (!this._hasViewers(state)) this._scheduleKill(state);
+        });
+    }
+
+    addWsClient(cameraId, camera, ws) {
+        const state = this._getOrCreate(cameraId, camera);
+        state.wsClients.add(ws);
+        console.log(`[stream:${cameraId}] WS cliente conectado (total: ${state.wsClients.size})`);
+        ws.on('close', () => {
+            state.wsClients.delete(ws);
+            console.log(`[stream:${cameraId}] WS cliente desconectado (quedan: ${state.wsClients.size})`);
+            if (!this._hasViewers(state)) this._scheduleKill(state);
         });
     }
 
@@ -207,7 +261,6 @@ class StreamManager {
         const filename  = `cam_${cameraId}_${timestamp}.mp4`;
         const outputPath = path.join(recordingsDir, filename);
 
-        // Direct RTSP copy — zero CPU, original quality, includes audio.
         const rec = spawn(FFMPEG, [
             '-fflags', 'nobuffer',
             '-rtsp_transport', 'tcp',
@@ -215,7 +268,7 @@ class StreamManager {
             '-i', camera.rtspUrl,
             '-map', '0:v',
             '-c:v', 'copy',
-            '-map', '0:a?',     // include audio if the camera has it
+            '-map', '0:a?',
             '-c:a', 'aac',
             '-ar', '44100',
             '-ac', '1',
@@ -238,17 +291,13 @@ class StreamManager {
             const cam = cameraManager.getCamera(cameraId);
             if (cam) cam.isRecording = false;
 
-            // Restart segment for continuous mode.
             if (camera.continuousRecord) {
                 setTimeout(() => this.startRecorder(cameraId, camera), 500);
             }
         });
 
-        // Periodic segmentation for continuous recordings.
         if (camera.continuousRecord && SEGMENT_MS > 0) {
-            segmentTimer = setTimeout(() => {
-                rec.kill('SIGTERM');
-            }, SEGMENT_MS);
+            segmentTimer = setTimeout(() => rec.kill('SIGTERM'), SEGMENT_MS);
         }
 
         this.recorders.set(cameraId, { process: rec, filename, segmentTimer, isMotion });
@@ -286,6 +335,27 @@ class StreamManager {
         if (cam) cam.isRecording = false;
     }
 
+    // ─── Frame snapshot (fallback for /api/cameras/[id]/frame) ──────────────
+
+    ensureViewer(cameraId, camera) {
+        const state = this._getOrCreate(cameraId, camera);
+
+        clearTimeout(state.frameAnchorTimer);
+
+        if (!state.frameAnchor) {
+            const anchor = { write: () => {}, on: () => {} };
+            state.frameAnchor = anchor;
+            state.clients.add(anchor);
+        }
+
+        state.frameAnchorTimer = setTimeout(() => {
+            state.clients.delete(state.frameAnchor);
+            state.frameAnchor = null;
+            state.frameAnchorTimer = null;
+            if (!this._hasViewers(state)) this._scheduleKill(state);
+        }, 5000);
+    }
+
     // ─── Motion hold (keeps viewer alive while YOLO reads the MJPEG stream) ───
 
     getLastFrame(cameraId) {
@@ -305,22 +375,18 @@ class StreamManager {
         if (!state?.motionAnchor) return;
         state.clients.delete(state.motionAnchor);
         state.motionAnchor = null;
-        if (state.clients.size === 0) {
-            setTimeout(() => {
-                if (state.clients.size === 0) {
-                    if (state.retryTimer) { clearTimeout(state.retryTimer); state.retryTimer = null; }
-                    state.ffmpegProcess?.kill('SIGTERM');
-                    this.streams.delete(cameraId);
-                }
-            }, 15000);
-        }
+        if (!this._hasViewers(state)) this._scheduleKill(state);
     }
 
-    // Force-stop viewer + recorder regardless of continuousRecord (used on delete).
+    // Force-stop viewer + recorder (used on delete).
     forceStopAll(cameraId) {
         const viewer = this.streams.get(cameraId);
         if (viewer) {
             viewer.clients.clear();
+            for (const res of viewer.sseClients) { try { res.end(); } catch (_) {} }
+            viewer.sseClients.clear();
+            for (const ws of viewer.wsClients) { try { ws.close(1001, 'Camera deleted'); } catch (_) {} }
+            viewer.wsClients.clear();
             if (viewer.retryTimer) { clearTimeout(viewer.retryTimer); viewer.retryTimer = null; }
             viewer.ffmpegProcess?.kill('SIGTERM');
             this.streams.delete(cameraId);

@@ -1,9 +1,19 @@
 import { useState, FormEvent } from 'react';
 import { signIn } from 'next-auth/react';
+import { getServerSession } from 'next-auth/next';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
 import { Shield, Eye, EyeOff, Camera, Bell, Lock } from 'lucide-react';
+import { authOptions } from '../../lib/auth';
+import type { GetServerSideProps } from 'next';
+
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const session = await getServerSession(ctx.req, ctx.res, authOptions as any);
+    if (session) return { redirect: { destination: '/', permanent: false } };
+    return { props: {} };
+};
 
 export default function LoginPage() {
     const router = useRouter();

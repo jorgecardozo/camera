@@ -20,6 +20,9 @@ export default withAuth({
         authorized({ token, req }) {
             // No APP_PASSWORD set → open access (dev / local-only mode)
             if (!APP_PASSWORD) return true;
+            // cv2.VideoCapture can't send HTTP Basic Auth — allow all localhost requests
+            const host = req.headers.get('host') ?? '';
+            if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) return true;
             // Basic Auth bypass for server-side requests (motion-detector → MJPEG)
             if (hasValidBasicAuth(req)) return true;
             // Require valid session
